@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "documentcraft"
+version = "0.1.0"
+description = "按 Word 模板将 Markdown 转为 DOCX"
+requires-python = ">=3.10"
+dependencies = ["docxcompose>=2.2,<3", "python-docx>=1.1,<2", "Pillow>=10,<13", "PyJWT[crypto]>=2.10,<3", "pywin32>=306; sys_platform == 'win32'"]
+
+[project.optional-dependencies]
+build-exe = ["pyinstaller>=6.11,<7"]
+
+[project.scripts]
+docflow = "documentcraft.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
