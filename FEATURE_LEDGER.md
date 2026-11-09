@@ -64,7 +64,7 @@
 
 | ID | 功能 | 验收条件 | 状态与实现 |
 | --- | --- | --- | --- |
-| DC-038 | 编辑器安装包 | Tauri 打包含 `docflow` sidecar 的 Windows 安装包 | 已实现 · 部分验收。`npm run bundle` 生成 `DocumentCraft_0.2.0_x64-setup.exe`；release 版可启动，sidecar 在隔离 PATH 下转换通过；安装包未实际安装 |
+| DC-038 | 编辑器安装包 | Tauri 打包含 `docflow` sidecar 的 Windows 安装包 | 已实现 · 部分验收。`scripts/build-sidecar.ps1` → `out/sidecar/`，`npm run bundle` 生成 `DocumentCraft_0.2.0_x64-setup.exe`；release 版可启动，sidecar 在隔离 PATH 下对话与导出通过；安装包未实际安装 |
 | DC-008 | 旧版 DOC 与 WPS COM | 可通过 WPS 对 DOC 模板和输出进行兼容转换 | 后续文档引擎切片 |
 | DC-009 | 本地工作台与模板管理 | Vue 3 / Tauri 2 经 FastAPI 调用核心，SQLite 保存任务和模板元数据 | 后续产品切片 |
 | DC-019 | HTML 转 PPT | 可在导航中独立接入 HTML 转 PPT 工作流 | 后续切片 |
@@ -175,3 +175,8 @@ foreach ($step in 'save','reopen','style','full','skip','plain') {
 - 浏览器中加载真实 `App` 并模拟 Tauri IPC：真实按键 Ctrl+2、Ctrl+5、Ctrl+0 切换标题与正文；Ctrl+T 打开插入表格并插入 2×4 表格；右键菜单在表格内显示行列操作并插入行；设置中录制 Ctrl+Alt+B、与 Ctrl+1 冲突时移除原绑定、恢复默认并写入设置文件；深色主题生效。Copilot 生成 11 个默认命令，发送消息时附带当前笔记与 [[笔记]] 内容，流式回答渲染表格并自动保存对话；/ 与 [[ 补全、新对话、从历史重新打开；右键运行命令与 Ctrl+Shift+K 的 Quick Ask 均能替换原选区。
 - 验收中修复：对话记录文件名去掉 Obsidian 笔记名不允许的 `[ ] # ^`；单段回答替换句中选区时按行内内容插入，不再拆开原段落。
 - 未执行：原生窗口内逐项点击、真实 AI 请求、ChatGPT 登录。
+
+## 2026-11-10 新目录下重新打包
+
+- `scripts/build-sidecar.ps1` 从 `core/` 打包到 `out/sidecar/DocumentCraft-cli.exe`。复制到 PATH 只含 System32 的临时目录运行：`chat` 对本地假 API 逐段输出并以 `done` 结束，文字为正确的 UTF-8；带批注的 `md-to-word` 写入 1 条批注并生成中文文件名的 DOCX。
+- `npm run bundle` 生成 77 MB 的安装包，NSIS 脚本从 `out/sidecar/` 取 sidecar 并安装到编辑器同目录。release 版直接启动，窗口正常响应。安装、卸载流程未在本机执行。
