@@ -13,9 +13,9 @@
 | DC-003 | 完整模板 | 在唯一正文锚点处插入内容，保留前后固定正文、封面和分节 | 已实现 · OOXML 模板为主文档，合并生成内容 |
 | DC-004 | CLI 和文件保护 | 支持明确输入、模板、输出和模式，失败时返回非零状态，默认保护已有输出 | 已实现 · `docflow md-to-word` |
 | DC-010 | 科研报告配图 | 自动配图区分缺图、新增、实图和待确认；按实际标题层级盘点总览、场景和细图；插入位置独立于取证范围；逐节记录未单独出图的理由，区分规划遗漏、候选校验和绘制失败。蓝图重建支持分层架构、三栏路线和时间轴 | 已实现 · `illustration.py`、`ai.py`。前一版去图稿实跑识别 32 处引用，13 个候选均回插，已对照旧版 19 图；本轮补强未测试 |
-| DC-011 | 界面 100% tokenized | 界面自定义设计值全部通过语义 design tokens 引用，规则见 AGENTS.md | 已实现 · 阅读编辑器的令牌定义在 `app/src/styles/tokens.css`、`tokens.ts`，组件样式只引用 token；断点因 CSS 媒体查询限制在注释中对应 `--dc-breakpoint-narrow` |
-| DC-012 | Windows x64 单文件 EXE | 仅复制 EXE 即可在 PATH 无 Python 和 Pandoc 的环境中运行转换 | 样例已验收（旧版） · 桌面单文件 EXE 已由阅读编辑器取代；`scripts/build-exe.ps1` 只打包 `dist-cli/DocumentCraft-cli.exe`，作为编辑器 sidecar |
-| DC-014 | 「我的文档模板」样式转换 | 中文语言标签可转换，模板的题目、图名、表名、图片及表格文字样式生效，保留标题编号定义并生成目录域；各节的普通正文统一使用模板的「正文」样式 | 正文样式修复已实现并打包 · `src/documentcraft/templates.py`；本次修复未测试 |
+| DC-011 | 界面 100% tokenized | 界面自定义设计值全部通过语义 design tokens 引用，规则见 AGENTS.md | 已实现 · 阅读编辑器的令牌定义在 `editor/src/styles/tokens.css`、`tokens.ts`，组件样式只引用 token；断点因 CSS 媒体查询限制在注释中对应 `--dc-breakpoint-narrow` |
+| DC-012 | Windows x64 单文件 EXE | 仅复制 EXE 即可在 PATH 无 Python 和 Pandoc 的环境中运行转换 | 样例已验收（旧版） · 桌面单文件 EXE 已由阅读编辑器取代；`scripts/build-sidecar.ps1` 只打包 `out/sidecar/DocumentCraft-cli.exe`，作为编辑器 sidecar |
+| DC-014 | 「我的文档模板」样式转换 | 中文语言标签可转换，模板的题目、图名、表名、图片及表格文字样式生效，保留标题编号定义并生成目录域；各节的普通正文统一使用模板的「正文」样式 | 正文样式修复已实现并打包 · `core/src/documentcraft/templates.py`；本次修复未测试 |
 | DC-015 | 转换桌面界面 | 双击同一 EXE 可选择源文件、模板和输出，并在界面完成转换 | 已被 DC-029 取代 · tkinter 桌面界面已移除，转换入口见 DC-032 |
 | DC-016 | 整表居中 | Markdown 表格按版心居中，优先保留模板明确指定的表格对齐 | 已验收 · WPS 对齐属性检查和页面渲染通过 |
 | DC-017 | AI 连接 | 配置兼容 API 或通过官方 Sign in with ChatGPT 授权。ChatGPT 模型和推理强度可分别选择、保存和恢复，分析请求分别发送 `model` 和所选的 `reasoning.effort` | 已实现 · `gui.py`、`ai.py`、`siwc.py`；本轮未测试 |
@@ -29,15 +29,21 @@
 | DC-026 | 单篇 Markdown 批注分享包 | 从阅读器生成 ZIP，解压后打开其中的 Markdown 可读到该文档批注；包内仅含源文档与该文档的批注数据库；已有 ZIP 受保护 | 已迁移 · 批注面板「分享包」→ `docflow share`（`editor_api.share_package`）；未测试 |
 | DC-027 | Markdown 阅读器工作区 | 从桌面版启动，在目录和文件之间切换，查看章节大纲，保留已有批注数据，资源随 EXE 打包 | 已被 DC-029、DC-030、DC-031 取代 · `reader.py`、`reader_ui/` 已移除 |
 | DC-028 | 工作区 AI 整理 | 本地检索工作区 Markdown，查看摘录后提交给已配置 AI，整理稿可跳回来源文件 | 已被 DC-034 取代 · 检索与整理逻辑保留在 `reader_assistant.py` |
-| DC-029 | VMark 精简编辑器外壳 | Tauri 2 + React + TipTap 窗口，打开工作区和 Markdown，所见即所得编辑并保存；Markdown 往返沿用 VMark 管线；VMark 的终端、MCP、浏览器、多格式、多窗口等功能不进入应用 | 部分验收 · `app/`。`tauri dev` 编译并启动窗口；Markdown 往返、保存与未保存提示经浏览器模拟验收；原生窗口内未逐项点击 |
+| DC-029 | VMark 精简编辑器外壳 | Tauri 2 + React + TipTap 窗口，打开工作区和 Markdown，所见即所得编辑并保存；Markdown 往返沿用 VMark 管线；VMark 的终端、MCP、浏览器、多格式、多窗口等功能不进入应用 | 部分验收 · `editor/`。`tauri dev` 编译并启动窗口；Markdown 往返、保存与未保存提示经浏览器模拟验收；原生窗口内未逐项点击 |
 | DC-030 | 文件树 | 侧栏显示工作区目录树，跳过隐藏目录与链接，点击 Markdown 打开，可刷新 | 已验收（模拟 IPC + Rust 测试） · `FileTree.tsx`、`workspace.rs` |
 | DC-031 | 文档大纲 | 侧栏按标题层级显示可折叠大纲，支持过滤，点击跳到对应标题 | 已验收（模拟 IPC） · `OutlineView.tsx`：层级、过滤与点击跳转 |
-| DC-032 | 编辑器内导出 Word | 从编辑器把当前文档按样式或完整模板导出 DOCX，可选包含批注；已有输出受保护 | 已验收（CLI 实跑 + 模拟 IPC） · `ExportDialog.tsx` → `docflow md-to-word --with-notes`；WPS 打开导出文件未复测 |
+| DC-032 | 编辑器内导出 Word | 从「设置 → MD 转 Word」把当前文档按样式或完整模板导出 DOCX，默认模板与模式可保存，可选包含批注；已有输出受保护 | 已实现 · 入口移至设置 · `editor/src/features/settings/WordExportSettings.tsx` → `docflow md-to-word --with-notes`；设置页经模拟 IPC 验收，导出逻辑沿用此前实跑结果 |
 | DC-033 | 编辑器批注 | 选中正文添加批注，侧栏列出并定位；批注按原文与前后文锚定，编辑后重新定位，无法定位的标记为待定位；数据沿用 `.documentcraft/reader-spike.sqlite3` | 已验收（CLI 实跑 + 模拟 IPC） · `annotations.ts`、`CommentsPanel.tsx`、`docflow notes` |
-| DC-034 | Copilot 工作区整理 | 侧栏对话：本地检索工作区摘录，确认后提交 AI 生成整理稿，来源可跳回文件 | 部分验收 · 本地检索实跑，界面与仅发送勾选摘录经模拟验收；真实 AI 整理未执行 |
-| DC-035 | 编辑器内科研配图 | 对当前文档发起配图分析，确认外发后生成配图版和审核清单，完成后可在编辑器打开 | 部分验收 · 对话框经模拟验收；真实 AI 配图未执行 |
-| DC-036 | 编辑器 AI 设置 | 兼容 API 与 ChatGPT 套餐两种连接；登录、取消、退出、模型和推理强度选择并保存；API Key 仅保留在当前会话 | 部分验收 · 对话框两种连接方式经模拟验收；`ai status` 实跑；登录、取消与模型读取未执行 |
+| DC-034 | Copilot 工作区整理 | 交互对应 Obsidian Copilot 的 Quick Chat：流式回答与停止；当前笔记、选区、[[笔记]] 与 + / @ 添加的上下文；/ 命令；对话与工作区检索两种模式；消息复制、编辑、插入或替换、重新生成、删除；对话自动保存与历史；AI 连接沿用已有配置 | 已验收（模拟 IPC） · `editor/src/features/copilot/`、`docflow chat`；流式对话经本地假 API 实跑，真实 AI 服务未请求 |
+| DC-035 | 编辑器内科研配图 | 从「设置 → 科研流程图」对当前文档发起配图分析，默认风格可保存，确认外发后生成配图版和审核清单 | 已实现 · 入口移至设置 · `editor/src/features/settings/FigureSettings.tsx` → `docflow illustrate`；真实 AI 配图未执行 |
+| DC-036 | 编辑器 AI 设置 | 兼容 API 与 ChatGPT 套餐两种连接；登录、取消、退出、模型和推理强度选择并保存；API Key 仅保留在当前会话 | 部分验收 · 移入「设置 → AI 连接」`editor/src/features/settings/AIConnectionSettings.tsx`；登录、取消与模型读取未执行 |
 | DC-037 | Python sidecar JSON 接口 | `docflow` 为编辑器提供 notes、share、illustrate、assistant、ai 子命令，统一 JSON 输出与非零失败码 | 已验收 · `editor_api.py`、`cli.py`；notes、share、md-to-word、assistant search、ai status 实跑 |
+| DC-040 | 目录约定 | 按 AGENTS.md「目录约定」划分 editor/、core/、scripts/、out/、local/；构建产物只写入 out/，私有资料在 local/ | 已实现 · AGENTS.md；Python 与 Rust 测试在新路径下通过 |
+| DC-041 | Obsidian 配色与布局 | 浅色、深色两套 Obsidian 默认主题配色，可跟随系统；Ribbon、左右侧栏、视图标题和状态栏布局参照 Obsidian | 已验收（模拟 IPC） · `editor/src/styles/tokens.css`、`settings/theme.ts` |
+| DC-042 | 设置入口 | 左侧导航分组的设置窗口：外观、快捷键、Copilot、AI 连接、MD 转 Word、科研流程图；设置持久化 | 已验收（模拟 IPC） · `editor/src/features/settings/`、`src-tauri/src/settings.rs` |
+| DC-043 | 编辑快捷键 | 默认 Ctrl+1～6 为 1～6 级标题、Ctrl+0 为正文段落、Ctrl+T 插入表格；全部快捷键可录制、清除、恢复默认，冲突时提示并移除原绑定 | 已验收（模拟 IPC，真实按键） · `editor/src/settings/` |
+| DC-044 | 编辑区右键菜单与插入表格 | 右键菜单含剪切、复制、粘贴、全选、插入表格、表格增删行列、添加批注和 Copilot 子菜单；插入表格可在网格中选择行列数，首行为表头 | 已验收（模拟 IPC） · `editor/src/editor/EditorContextMenu.tsx`、`InsertTablePicker.tsx` |
+| DC-045 | Copilot 命令与 Quick Ask | 命令以 Markdown 保存在 copilot-custom-prompts/，格式与 Obsidian Copilot 相同，可生成默认命令；右键或快捷键打开 Quick Ask，结果可复制、插入、替换选区或追问 | 已验收（模拟 IPC） · `editor/src/features/copilot/` |
 
 ## Should
 
@@ -45,7 +51,7 @@
 | --- | --- | --- | --- |
 | DC-005 | 预检查和机器可读结果 | 报告模板锚点异常、缺失图片和转换错误，提供 JSON 输出 | 已实现 · `--check`、`--json`；图像支持本地文件 |
 | DC-006 | 完整模板目录更新 | 请求编辑器在打开时更新域 | 已实现 · 写入 `w:updateFields`，实际更新取决于 Word/WPS |
-| DC-013 | 脚注资源保真 | 两种模板模式保留脚注、外部链接和本地图像，脚注引用指向输出包内正确的资源 | 样例已验收 · `src/documentcraft/templates.py` |
+| DC-013 | 脚注资源保真 | 两种模板模式保留脚注、外部链接和本地图像，脚注引用指向输出包内正确的资源 | 样例已验收 · `core/src/documentcraft/templates.py` |
 
 ## Could
 
@@ -157,6 +163,15 @@ foreach ($step in 'save','reopen','style','full','skip','plain') {
 
 ## 2026-11-09 安装包
 
-- `scripts/build-exe.ps1` 打包 sidecar 时显式加入 `sqlite3.dll`。conda 版 Python 把它放在 `Libraryin`，此前漏打，EXE 一启动就报 DLL load failed。脚本改回纯 ASCII 注释：Windows PowerShell 5.1 按 ANSI 代码页读取无 BOM 的 UTF-8，中文注释会吞掉下一行。
+- `scripts/build-sidecar.ps1` 打包 sidecar 时显式加入 `sqlite3.dll`。conda 版 Python 把它放在 `Library\bin`，此前漏打，EXE 一启动就报 DLL load failed。脚本改回纯 ASCII 注释：Windows PowerShell 5.1 按 ANSI 代码页读取无 BOM 的 UTF-8，中文注释会吞掉下一行。
 - sidecar 复制到只含 `System32` 的 PATH 环境中运行，`notes list` 与带批注的 `md-to-word` 均成功。
-- `npm run bundle` 使用 `tauri.bundle.conf.json`，只在安装包中带上 sidecar，开发模式仍运行 `src/` 源码。NSIS 脚本把 `DocumentCraft-cli.exe` 安装到编辑器同目录。release 版直接启动，窗口正常加载。安装、卸载流程未在本机执行。
+- `npm run bundle` 使用 `tauri.bundle.conf.json`，只在安装包中带上 sidecar，开发模式仍运行 `core/src/` 源码。NSIS 脚本把 `DocumentCraft-cli.exe` 安装到编辑器同目录。release 版直接启动，窗口正常加载。安装、卸载流程未在本机执行。
+
+## 2026-11-10 Obsidian 风格界面、设置与 Copilot
+
+- 目录重组：`app/` → `editor/`；Python 核心（含 tests、tools、spikes）→ `core/`；构建产物 → `out/`；验收文档 → `local/`。约定写入 AGENTS.md。`core/` 以 `pip install -e core` 重新安装后，8 项 Python 测试与 4 项 Rust 测试（含开发模式下从 `core/src` 启动 docflow）通过。
+- `docflow chat`：用本地假的兼容 API 验证 SSE 解析，输出逐段 `delta` 与 `done`；空对话、最后一条非用户消息返回 JSON 错误与非零退出码。ChatGPT 套餐复用原 Responses 流式读取。
+- 新模块逻辑检查 21 项通过：快捷键规范写法与匹配、冲突查找、设置合并与类型校验、对话记录的保存与解析往返（含 CRLF）、路径工具。
+- 浏览器中加载真实 `App` 并模拟 Tauri IPC：真实按键 Ctrl+2、Ctrl+5、Ctrl+0 切换标题与正文；Ctrl+T 打开插入表格并插入 2×4 表格；右键菜单在表格内显示行列操作并插入行；设置中录制 Ctrl+Alt+B、与 Ctrl+1 冲突时移除原绑定、恢复默认并写入设置文件；深色主题生效。Copilot 生成 11 个默认命令，发送消息时附带当前笔记与 [[笔记]] 内容，流式回答渲染表格并自动保存对话；/ 与 [[ 补全、新对话、从历史重新打开；右键运行命令与 Ctrl+Shift+K 的 Quick Ask 均能替换原选区。
+- 验收中修复：对话记录文件名去掉 Obsidian 笔记名不允许的 `[ ] # ^`；单段回答替换句中选区时按行内内容插入，不再拆开原段落。
+- 未执行：原生窗口内逐项点击、真实 AI 请求、ChatGPT 登录。
