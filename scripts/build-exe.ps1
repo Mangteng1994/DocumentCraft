@@ -1,10 +1,10 @@
 param(
     [string]$Python = (Join-Path $PSScriptRoot '..\.venv\Scripts\python.exe'),
     [string]$Pandoc = (Get-Command pandoc.exe -ErrorAction Stop).Source,
-    [switch]$Console,
-    [string]$DesktopOutput = 'dist'
+    [string]$Output = 'dist-cli'
 )
 
+# 打包 docflow 命令行版。阅读编辑器以它作为 sidecar，后续 Tauri 安装包也从这里取 EXE。
 $ErrorActionPreference = 'Stop'
 $pythonExe = (Get-Command $Python -ErrorAction Stop).Source
 $pandocExe = (Resolve-Path -LiteralPath $Pandoc).Path
@@ -17,29 +17,14 @@ $copying = Join-Path $pandocDir 'COPYING.rtf'
 
 Push-Location (Join-Path $PSScriptRoot '..')
 try {
-    # GUI and CLI builds use separate Windows subsystems and output directories.
-    $entryArgs = @('--windowed', '--name', 'DocumentCraft', '--distpath', $DesktopOutput, 'src/documentcraft/gui.py')
-    if ($Console) {
-        $entryArgs = @(
-            '--console', '--name', 'DocumentCraft-cli', '--distpath', 'dist-cli',
-            'src/documentcraft/__main__.py'
-        )
-    }
-    else {
-        $readerAssets = (Resolve-Path -LiteralPath 'src/documentcraft/reader_ui').Path
-        $entryArgs = @(
-            '--collect-data', 'webview',
-            '--hidden-import', 'webview.platforms.winforms',
-            '--add-data', "${readerAssets}:documentcraft/reader_ui"
-        ) + $entryArgs
-    }
     $buildArgs = @(
-        '--noconfirm', '--onefile', '--noupx',
+        '--noconfirm', '--onefile', '--noupx', '--console',
+        '--name', 'DocumentCraft-cli', '--distpath', $Output,
         '--paths', 'src', '--specpath', 'build', '--workpath', 'build',
         '--collect-data', 'docx', '--collect-data', 'docxcompose', '--collect-data', 'babel',
-        '--add-binary', "${pandocExe}:engine", '--add-data', "${copyright}:engine", '--add-data', "${copying}:engine"
+        '--add-binary', "${pandocExe}:engine", '--add-data', "${copyright}:engine", '--add-data', "${copying}:engine",
+        'src/documentcraft/__main__.py'
     )
-    $buildArgs += $entryArgs
     & $pythonExe -m PyInstaller @buildArgs
     if ($LASTEXITCODE -ne 0) {
         throw "EXE build failed with exit code $LASTEXITCODE."

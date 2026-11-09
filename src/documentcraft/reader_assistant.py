@@ -2,15 +2,12 @@
 
 from collections import Counter
 from collections.abc import Iterable
-import json
-import os
 from pathlib import Path
 import re
 
-from .ai import AISettings, DEFAULT_ENDPOINT, DEFAULT_MODEL, request_json, settings_path
+from .ai import AISettings, request_json
 from .templates import ConversionError
 
-READER_SETTINGS_ENV = "DOCUMENTCRAFT_READER_AI_SETTINGS"
 SOURCE_LIMIT = 8
 MAX_FILE_BYTES = 1_000_000
 MAX_PASSAGE_LENGTH = 720
@@ -22,26 +19,6 @@ INSTRUCTIONS = """
 用中文短段落或列表输出，可在句末标记资料编号，如 [1]。只返回 JSON 对象，字段 answer
 为整理稿字符串，citations 为实际使用的资料编号整数数组。不得虚构编号、文件名或行号。
 """
-
-
-def reader_settings() -> AISettings:
-    """读取工作台启动时的设置。独立启动时使用本地保存的配置。"""
-    raw = os.environ.pop(READER_SETTINGS_ENV, None)
-    try:
-        values = json.loads(raw if raw is not None else settings_path().read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        values = {}
-    if not isinstance(values, dict):
-        values = {}
-
-    def value(name: str, default: str = "") -> str:
-        selected = values.get(name, default)
-        return selected if isinstance(selected, str) else default
-
-    provider = value("provider", "API Key")
-    if provider in {"Sign in with ChatGPT", "ChatGPT（Codex CLI）"}:
-        return AISettings("chatgpt", model=value("chatgpt_model"), reasoning_effort=value("chatgpt_effort"))
-    return AISettings("api", value("endpoint", DEFAULT_ENDPOINT), value("model", DEFAULT_MODEL), value("key"))
 
 
 def _terms(text: str) -> set[str]:
@@ -123,7 +100,7 @@ def search_workspace(root: Path, paths: Iterable[str], question: str) -> list[di
 def organize_workspace(settings: AISettings, question: str, sources: list[dict]) -> dict:
     """整理用户已确认的摘录，并把引用绑定到本地检索结果。"""
     if settings.provider == "chatgpt" and not settings.model:
-        raise ConversionError("请在工作台的 AI 设置中选择并保存 ChatGPT 模型，再打开阅读器。")
+        raise ConversionError("请在 AI 设置中选择并保存 ChatGPT 模型。")
     if not sources:
         raise ConversionError("请先检索到相关摘录。")
     response = request_json(settings, INSTRUCTIONS, {"question": question, "sources": sources})

@@ -1,6 +1,6 @@
 # DocumentCraft 工作约定
 
-DocumentCraft 是面向 Windows 与 WPS 的本地科研文档工具。Python 转换核心位于 `src/documentcraft/`，CLI 入口为 `docflow`。依赖安装与运行命令见 [README.md](README.md)。
+DocumentCraft 是面向 Windows 与 WPS 的本地科研文档阅读编辑器。编辑器位于 `app/`（Tauri 2 + React + TipTap，编辑核心移植自 VMark，移植代码在 `app/src/vendor/vmark/`，改动记录在其 README）。Python 核心位于 `src/documentcraft/`，CLI 入口为 `docflow`，编辑器以 sidecar 方式调用。依赖安装与运行命令见 [README.md](README.md)。
 
 ## Feature Ledger 与 MoSCoW
 
@@ -10,7 +10,7 @@ DocumentCraft 是面向 Windows 与 WPS 的本地科研文档工具。Python 转
 
 ## 界面 100% tokenized
 
-1. 所有界面设计值统一定义为设计令牌（design tokens）。覆盖颜色、字体、字号、字重、行高、间距、尺寸、边框、圆角、阴影、层级、动效和响应式断点。
+1. 所有界面设计值统一定义为设计令牌（design tokens），定义层为 `app/src/styles/tokens.css` 和 `app/src/styles/tokens.ts`。覆盖颜色、字体、字号、字重、行高、间距、尺寸、边框、圆角、阴影、层级、动效和响应式断点。
 2. 页面、组件、内联样式、图标主题属性与响应式配置引用语义 token。第三方组件库的主题变量映射到同一套 token。新增设计值先添加或复用 token，再在界面中引用。
 3. 每次修改界面时检查本次变更中的设计值引用。设计值字面量集中在 token 定义层。转换引擎、CLI、业务数据和协议常量按各自的领域约定维护。
 

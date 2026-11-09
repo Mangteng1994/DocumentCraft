@@ -1,32 +1,66 @@
 # DocumentCraft
 
-面向科研文档的本地转换工具。Windows x64 单文件程序可将 Markdown 按 DOCX 模板转换为可编辑的 Word 文档，也提供命令行和 Python API。整体范围和本轮优先级见 [Feature Ledger](FEATURE_LEDGER.md)。
+面向科研文档的本地 Markdown 阅读编辑器。在工作区中浏览和编辑 Markdown，并在编辑器里完成批注、Copilot 整理、科研配图和按 Word 模板导出。整体范围和本轮优先级见 [Feature Ledger](FEATURE_LEDGER.md)。
 
-## Windows 单文件版
+项目由两部分组成：
 
-双击 `dist/DocumentCraft.exe`，选择 Markdown 文件、Word 模板和保存位置，再点「开始转换」。完成后可从窗口直接打开 Word 文档。Python 运行时和 Pandoc 随 EXE 内置。
+| 目录 | 内容 |
+| --- | --- |
+| `app/` | 阅读编辑器。Tauri 2 + React + TipTap，编辑核心移植自 [VMark](https://github.com/xiaolai/vmark)（ISC，见 `app/src/vendor/vmark/README.md`），只保留文件树和文档大纲两个侧栏视图 |
+| `src/documentcraft/` | Python 核心与 `docflow` CLI：Markdown → DOCX 转换、批注存储与导出、科研配图、工作区整理和 AI 连接。编辑器以 sidecar 方式调用 |
 
-命令行可使用 `docflow`，也可用 `build-exe.ps1 -Console` 打包 `dist-cli/DocumentCraft-cli.exe` 后在 PowerShell 中传参运行。
+## 阅读编辑器
+
+「打开文件夹」选择工作区，左侧「文件」列出其中的 Markdown 目录树（隐藏目录与链接不显示），「大纲」按标题层级列出当前文档，可过滤和折叠，点击跳到标题。正文为所见即所得编辑，`Ctrl+S` 保存。Markdown 往返沿用 VMark 管线，保留原文空行、引用式链接、脚注、公式、提示块、前置元数据等结构。工作区内的本地图片按文档所在目录解析。
+
+工具栏功能：
+
+- **批注**：选中同一段内的文字，在右侧批注面板点「为选区添加批注」。批注按原文和前后文锚定，编辑正文后自动重新定位，无法唯一定位的标为「待定位」。批注保存在文档所在目录的 `.documentcraft/reader-spike.sqlite3`，可继续读取旧阅读器的数据。「分享包」将当前 Markdown 和这篇文档的批注打成 ZIP，外部附件另行传递。
+- **导出 Word**：选择 DOCX 模板、模板模式和保存位置，可勾选「包含批注」写入 WPS / Word 可编辑的批注。导出前自动保存。批注无法定位或位于暂不支持的段落（含公式、图片、换行等）时会先提示，可明确跳过。
+- **科研配图**：对当前文档发起 AI 配图分析，见下文「科研配图」。完成后可在编辑器中打开配图版和审核清单。
+- **Copilot**：向工作区提问。先在本地检索 Markdown 摘录，勾选确认后，只有选中的摘录和问题发给所选 AI 服务。整理稿可复制或插入光标处，来源可跳回对应文件。
+- **AI 设置**：选择「兼容 API」或「ChatGPT 套餐」。API Key 只保存在本次会话内存，也可由 `OPENAI_API_KEY` 提供。
+
+### 运行编辑器
+
+需要 Node.js 22+、Rust stable、[Tauri 2 前置依赖](https://v2.tauri.app/start/prerequisites/)（Windows 需 WebView2 Runtime），以及下文「从源码构建和测试」中的 `.venv`。
+
+```powershell
+cd app
+npm install
+npx tauri dev
+```
+
+编辑器按以下顺序寻找 `docflow`：环境变量 `DOCUMENTCRAFT_DOCFLOW` 指定的可执行文件；编辑器同目录的 `DocumentCraft-cli.exe`；仓库根目录 `.venv` 中的 Python（以 `-m documentcraft` 运行 `src/`）。安装包打包（DC-038）尚未排期。
+
+### sidecar 接口
+
+编辑器调用的子命令都向标准输出写一行 JSON，失败时为 `{"status": "error", "message": ...}` 并返回非零退出码。批注正文、检索摘录和设置经标准输入传 JSON。
+
+| 命令 | 用途 |
+| --- | --- |
+| `docflow notes list\|add\|update\|delete --source 文档.md [--id 编号]` | 读写批注 |
+| `docflow md-to-word ... --with-notes [--skip-unresolved] --json` | 导出 Word 并写入批注 |
+| `docflow share --source 文档.md --output 分享包.zip` | 打包 Markdown 与批注 |
+| `docflow illustrate --source 报告 --style mono\|colored` | 科研配图 |
+| `docflow assistant search\|organize --workspace 目录 --question 问题` | Copilot 检索与整理 |
+| `docflow ai status\|save\|login\|logout\|models` | AI 设置与 ChatGPT 登录 |
+
+## 命令行转换
+
+`docflow md-to-word` 按 DOCX 模板将 Markdown 转换为可编辑的 Word 文档。`scripts/build-exe.ps1` 可打包 `dist-cli/DocumentCraft-cli.exe`，Python 运行时和 Pandoc 随 EXE 内置。
 
 ```powershell
 .\dist-cli\DocumentCraft-cli.exe md-to-word --input "报告.md" --template "科研报告模板.docx" --output "报告.docx"
 ```
 
-## Markdown 阅读器
-
-在桌面工作台的「Markdown 阅读器」中打开文件。阅读窗口可切换工作区、浏览目录和文件，通过大纲跳到标题。正文支持常见 Markdown 排版及工作区内的本地位图。Windows 需要 Microsoft Edge WebView2 Runtime。
-
-选中文字后写批注。批注保存在工作区的 `.documentcraft/reader-spike.sqlite3`，可以继续打开原有 Spike 数据。Markdown 源文件保持只读。选择「导出 DOCX」可用样式模板或完整模板生成 WPS 可编辑的 Word 批注。遇到待定位或当前不支持导出的批注，界面会先提示，用户可明确跳过。分享按钮将当前 Markdown 和这篇文档的批注打成一个 ZIP，收件人解压后用阅读器打开其中的 Markdown。外部附件另行传递。
-
-「AI 整理」复用工作台选定的 AI 服务。先本地检索当前工作区的 Markdown，查看摘录后再生成整理稿。只有确认的摘录及问题会发给所选服务。来源可跳回工作区内对应文件。若更换连接设置，重新打开阅读器以应用当前设置。
-
 ## 科研配图
 
-在「AI 设置」选连接方式。「兼容 API」使用兼容 `/chat/completions` 且支持 JSON 输出的服务，可配置地址和模型。Key 可在窗口中输入，或从 `OPENAI_API_KEY` 读取，窗口中输入的 Key 仅用于当前会话。
+在「AI 设置」选连接方式。「兼容 API」使用兼容 `/chat/completions` 且支持 JSON 输出的服务，可配置地址和模型。
 
-选择「ChatGPT 套餐」，点击「Continue with ChatGPT」，在系统浏览器登录并授权 DocumentCraft 使用套餐额度。应用用 Windows DPAPI 加密保存会话。登录后，在「分析参数」分别选择模型和推理强度。可选强度随模型变化，选择「模型默认」时由服务端决定。点击「保存设置」可在下次启动时恢复选择。此连接通过公开 Responses API 分析正文，由本地程序绘制 PNG。[官方桌面登录流程](https://developers.openai.com/siwc/token-sharing-open-source/sign-in)
+选择「ChatGPT 套餐」，点击「Continue with ChatGPT」，在系统浏览器登录并授权 DocumentCraft 使用套餐额度。应用用 Windows DPAPI 加密保存会话。登录后分别选择模型和推理强度。可选强度随模型变化，选择「模型默认」时由服务端决定。点击「保存设置」可在下次启动时恢复选择。此连接通过公开 Responses API 分析正文，由本地程序绘制 PNG。[官方桌面登录流程](https://developers.openai.com/siwc/token-sharing-open-source/sign-in)
 
-在「科研配图」选择报告和黑白或分区配色风格，然后开始分析。程序在确认后向所选服务提交报告文本、标题层级、实图位置和引用线索。结果包括配图版报告、PNG 资源和 `审核清单.md`。旧版 DOC 需要本机 WPS，配图版输出 DOCX。
+打开报告后点「科研配图」，选择黑白或分区配色风格，然后开始分析。程序在确认后向所选服务提交报告文本、标题层级、实图位置和引用线索。结果包括配图版报告、PNG 资源和 `审核清单.md`。命令行的 `docflow illustrate` 也接受 DOCX，旧版 DOC 需要本机 WPS，配图版输出 DOCX。
 
 审核清单区分「有引用但缺图」「原文适合新增」「已有实图」「待确认」，并分开记录插入位置和取证范围。图名和「如下图所示」是引用线索，只有原稿中的实图位置才能用于覆盖判断。节选按实际标题层级盘点全文总览、场景路线和细节机制，可以在章节概述后插图，同时从后续段落或表格取证。
 
