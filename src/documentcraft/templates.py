@@ -47,6 +47,11 @@ def apply_template_styles(template: Document, content: Document) -> bool:
         for style in template.styles if style.type == WD_STYLE_TYPE.PARAGRAPH
     }
     style_ids = set(paragraph_styles.values())
+    normal_style = paragraph_styles.get("Normal") or paragraph_styles.get("正文")
+    body_style_ids = {"FirstParagraph", "BodyText"}
+    for name in ("First Paragraph", "Body Text"):
+        if name in paragraph_styles:
+            body_style_ids.add(paragraph_styles[name])
     cell_style = paragraph_styles.get("表格文字")
     body = content.element.body
     changed = False
@@ -68,10 +73,18 @@ def apply_template_styles(template: Document, content: Document) -> bool:
     for paragraph in body.xpath(".//w:p"):
         style = paragraph.find(f"./{qn('w:pPr')}/{qn('w:pStyle')}")
         style_id = style.get(qn("w:val")) if style is not None else None
+        if style_id in {"CaptionedFigure", "TableCaption"}:
+            # 题注与图表同页，避免图片或表名落在上一页底部。
+            paragraph.get_or_add_pPr().get_or_add_keepNext().val = True
+            changed = True
         target = None
         if cell_style and style_id in {None, "Compact", "BodyText", "FirstParagraph"}:
             if next(paragraph.iterancestors(qn("w:tc")), None) is not None:
                 target = cell_style
+        # Pandoc 区分首段与后续段，且可能直接使用参考模板中的样式 ID。
+        if normal_style and style_id in body_style_ids and paragraph.getparent() is body:
+            if not paragraph.xpath("./w:pPr/w:numPr"):
+                target = normal_style
         if target is None and style_id not in style_ids:
             for name in STYLE_ALIASES.get(style_id, ()):
                 target = paragraph_styles.get(name)

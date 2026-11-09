@@ -62,6 +62,7 @@ class AISettings:
     endpoint: str = DEFAULT_ENDPOINT
     model: str = DEFAULT_MODEL
     key: str = field(default="", repr=False)
+    reasoning_effort: str = ""
 
 
 class NoRedirect(HTTPRedirectHandler):
@@ -111,7 +112,9 @@ def analyze(settings: AISettings, paragraphs: list[dict]) -> dict:
     try:
         if settings.provider == "chatgpt":
             instructions = INSTRUCTIONS + "\nJSON Schema:\n" + json.dumps(PLAN_SCHEMA)
-            response = analyze_report(settings.model, instructions, report)
+            response = analyze_report(
+                settings.model, instructions, report, reasoning_effort=settings.reasoning_effort,
+            )
         elif settings.provider == "api":
             response = _api_analysis(settings, report)
         else:

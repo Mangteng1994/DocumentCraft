@@ -2,17 +2,20 @@
 
 import os
 import json
+from collections import Counter
 from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 from tempfile import NamedTemporaryFile
+from threading import Event
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
 from documentcraft.ai import AISettings, DEFAULT_ENDPOINT, DEFAULT_MODEL
 from documentcraft.converter import TemplateMode, convert
 from documentcraft.illustration import illustrate
-from documentcraft.siwc import RESOURCE, account_models, sign_in, sign_out
+from documentcraft.siwc import RESOURCE, ChatGPTModel, account_models, saved_account, sign_in, sign_out
+from documentcraft.templates import ConversionError
 
 
 # 界面颜色、字体、间距、尺寸和反馈节奏集中定义。
@@ -22,12 +25,15 @@ MUTED = "#4A6257"
 ACCENT = "#245B49"
 ACCENT_HOVER = "#194536"
 ON_ACCENT = "#F6FFF9"
+CONNECTION_SURFACE = "#E8EFEB"
 HEADING = ("Microsoft YaHei UI", 23, "bold")
 BODY = ("Microsoft YaHei UI", 10)
+SECTION_HEADING = ("Microsoft YaHei UI", 11, "bold")
 PAD = 24
 GAP = 12
 SMALL_GAP = 5
 BUTTON_PAD = (14, 8)
+FIELD_PAD = (8, 4)
 WINDOW_MIN = (750, 510)
 WRAP_WIDTH = 600
 POLL_MS = 80
@@ -37,6 +43,18 @@ WORD_FILES = (("Word 文档", "*.docx"),)
 REPORT_FILES = (("科研报告", "*.md *.markdown *.docx *.doc"),)
 CHATGPT_PROVIDER = "Sign in with ChatGPT"
 PROVIDERS = {"API Key": "api", CHATGPT_PROVIDER: "chatgpt"}
+PROVIDER_LABELS = {"API Key": "兼容 API", CHATGPT_PROVIDER: "ChatGPT 套餐"}
+EFFORT_LABELS = {
+    "": "模型默认",
+    "none": "不启用（None）",
+    "minimal": "最低（Minimal）",
+    "low": "低（Low）",
+    "medium": "中（Medium）",
+    "high": "高（High）",
+    "xhigh": "很高（XHigh）",
+    "max": "最高（Max）",
+}
+EFFORT_VALUES = {label: value for value, label in EFFORT_LABELS.items()}
 ILLUSTRATION_STYLES = {"黑白工程图": False, "按功能分区配色": True}
 
 
@@ -51,22 +69,36 @@ class ConversionWindow:
         self.mode = tk.StringVar(root, value=next(iter(MODES)))
         self.status = tk.StringVar(root, value="请选择 Markdown 文件和 DOCX 模板。")
         self.worker = ThreadPoolExecutor(max_workers=1)
+        self.conversion_worker = ThreadPoolExecutor(max_workers=1)
         self.pending: Future[dict[str, str]] | None = None
         self.result: Path | None = None
         self.task: Future | None = None
+        self.task_label = ""
+        self.login_cancel: Event | None = None
         self.report_source = tk.StringVar(root)
         self.report_style = tk.StringVar(root)
         self.report_status = tk.StringVar(root, value="选定报告和绘图风格后开始。")
-        self.ai_status = tk.StringVar(root, value="API Key 仅用于当前会话。")
+        self.ai_status = tk.StringVar(root)
+        self.chatgpt_status = tk.StringVar(root)
+        self.chatgpt_connection = tk.StringVar(root)
+        self.effort_hint = tk.StringVar(root)
+        self.chatgpt_account: str | None = None
         self.provider = tk.StringVar(root, value=next(iter(PROVIDERS)))
         self.endpoint = tk.StringVar(root, value=DEFAULT_ENDPOINT)
         self.model = tk.StringVar(root, value=DEFAULT_MODEL)
         self.api_key = tk.StringVar(root)
         self.chatgpt_model = tk.StringVar(root)
-        self.chatgpt_models: dict[str, str] = {}
+        self.chatgpt_effort = tk.StringVar(root)
+        self.chatgpt_models: dict[str, ChatGPTModel] = {}
+        self.saved_chatgpt_model = ""
+        self.saved_chatgpt_effort = ""
         self.review_path: Path | None = None
         self.illustrated_path: Path | None = None
         self._load_ai_settings()
+        try:
+            self.chatgpt_account = saved_account()
+        except (ConversionError, OSError) as error:
+            self.chatgpt_status.set(str(error))
         self._build()
 
     def _build(self) -> None:
@@ -81,6 +113,12 @@ class ConversionWindow:
         style.configure("Desk.TLabel", background=SURFACE, foreground=INK, font=BODY)
         style.configure("Title.Desk.TLabel", font=HEADING)
         style.configure("Status.Desk.TLabel", foreground=MUTED)
+        style.configure("Section.Desk.TLabel", font=SECTION_HEADING)
+        style.configure("Connection.Desk.TFrame", background=CONNECTION_SURFACE)
+        style.configure("Connection.Section.Desk.TLabel", background=CONNECTION_SURFACE)
+        style.configure("Desk.TRadiobutton", background=SURFACE, foreground=INK, font=BODY, padding=FIELD_PAD)
+        style.configure("Desk.TEntry", padding=FIELD_PAD)
+        style.configure("Desk.TCombobox", padding=FIELD_PAD)
         style.configure("Desk.TButton", font=BODY, padding=BUTTON_PAD)
         style.configure(
             "Convert.TButton",
@@ -138,7 +176,7 @@ class ConversionWindow:
             style="Status.Desk.TLabel", wraplength=WRAP_WIDTH,
         ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(0, GAP))
         self._file_row(panel, 2, "科研报告", self.report_source, self._choose_report)
-        self._choice(panel, 4, "绘图风格", self.report_style, tuple(ILLUSTRATION_STYLES))
+        self._choice(panel, 4, "绘图风格", self.report_style, tuple(ILLUSTRATION_STYLES), span=2)
         self.illustrate_button = ttk.Button(
             panel, text="分析并生成配图", command=self._start_illustration, style="Convert.TButton",
         )
@@ -160,42 +198,135 @@ class ConversionWindow:
         ).grid(row=8, column=0, columnspan=2, sticky="w")
 
     def _build_ai(self, panel: ttk.Frame) -> None:
-        self._choice(panel, 1, "分析连接", self.provider, tuple(PROVIDERS))
-        self._setting(panel, 3, "API 地址（包含 /v1 或兼容前缀）", self.endpoint)
-        self._setting(panel, 5, "分析模型", self.model)
-        self._setting(panel, 7, "API Key（可读取 OPENAI_API_KEY）", self.api_key, masked=True)
-        self.chatgpt_picker = self._choice(panel, 9, "ChatGPT 套餐模型", self.chatgpt_model, ())
-        actions = ttk.Frame(panel, style="Desk.TFrame")
-        actions.grid(row=11, column=0, columnspan=2, sticky="w", pady=(0, GAP))
-        for label, command in (
-            ("保存设置", self._save_ai_settings),
-            (CHATGPT_PROVIDER, self._login),
-            ("刷新模型", self._refresh_models),
-            ("退出 ChatGPT", self._logout),
-        ):
-            ttk.Button(actions, text=label, command=command, style="Desk.TButton").pack(
-                side="left", padx=(0, GAP),
-            )
+        """按连接方式切换表单，保存入口始终位于同一位置。"""
         ttk.Label(
-            panel, textvariable=self.ai_status, style="Status.Desk.TLabel", wraplength=WRAP_WIDTH,
-        ).grid(row=12, column=0, columnspan=2, sticky="w")
+            panel, text="选择科研配图分析报告时使用的 AI 服务。", style="Status.Desk.TLabel",
+        ).grid(row=1, column=0, sticky="w", pady=(0, GAP))
 
-    def _choice(self, panel, row, title, variable, values) -> ttk.Combobox:
-        ttk.Label(panel, text=title, style="Desk.TLabel").grid(
-            row=row, column=0, sticky="w", pady=(0, SMALL_GAP),
+        providers = ttk.Frame(panel, style="Desk.TFrame")
+        providers.grid(row=2, column=0, sticky="w", pady=(0, GAP))
+        for value, label in PROVIDER_LABELS.items():
+            ttk.Radiobutton(
+                providers, text=label, value=value, variable=self.provider,
+                command=self._show_provider, style="Desk.TRadiobutton",
+            ).pack(side="left", padx=(0, GAP))
+
+        self.api_panel = ttk.Frame(panel, style="Desk.TFrame")
+        self.api_panel.grid(row=3, column=0, sticky="ew")
+        self.api_panel.columnconfigure(0, weight=1, uniform="api")
+        self.api_panel.columnconfigure(1, weight=1, uniform="api")
+        self._setting(self.api_panel, 0, "API 地址（含 /v1 或兼容前缀）", self.endpoint, span=2)
+        self._setting(self.api_panel, 2, "模型（Model）", self.model, right_gap=GAP)
+        self._setting(self.api_panel, 2, "API Key", self.api_key, column=1, masked=True)
+        ttk.Label(
+            self.api_panel, text="API Key 仅用于当前会话。留空时读取 OPENAI_API_KEY。",
+            style="Status.Desk.TLabel", wraplength=WRAP_WIDTH,
+        ).grid(row=4, column=0, columnspan=2, sticky="w")
+
+        self.chatgpt_panel = ttk.Frame(panel, style="Desk.TFrame")
+        self.chatgpt_panel.grid(row=3, column=0, sticky="ew")
+        self.chatgpt_panel.columnconfigure(0, weight=1)
+        self._build_chatgpt_settings(self.chatgpt_panel)
+
+        panel.rowconfigure(4, weight=1)
+        footer = ttk.Frame(panel, style="Desk.TFrame")
+        footer.grid(row=5, column=0, sticky="ew", pady=(GAP, 0))
+        footer.columnconfigure(0, weight=1)
+        ttk.Separator(footer).grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, GAP))
+        ttk.Label(
+            footer, textvariable=self.ai_status, style="Status.Desk.TLabel", wraplength=WRAP_WIDTH,
+        ).grid(row=1, column=0, sticky="w", padx=(0, GAP))
+        ttk.Button(
+            footer, text="保存设置", command=self._save_ai_settings, style="Convert.TButton",
+        ).grid(row=1, column=1, sticky="e")
+        self._sync_chatgpt_controls()
+        self._show_provider()
+
+    def _build_chatgpt_settings(self, panel: ttk.Frame) -> None:
+        """把账号操作与报告分析参数分开显示。"""
+        connection = ttk.Frame(panel, padding=GAP, style="Connection.Desk.TFrame")
+        connection.grid(row=0, column=0, sticky="ew", pady=(0, SMALL_GAP))
+        connection.columnconfigure(0, weight=1)
+        ttk.Label(
+            connection, textvariable=self.chatgpt_connection, style="Connection.Section.Desk.TLabel",
+            wraplength=WRAP_WIDTH,
+        ).grid(row=0, column=0, columnspan=2, sticky="w")
+        actions = ttk.Frame(connection, style="Connection.Desk.TFrame")
+        actions.grid(row=1, column=0, sticky="w", pady=(SMALL_GAP, 0))
+        self.login_button = ttk.Button(
+            actions, text="Continue with ChatGPT", command=self._login, style="Desk.TButton",
         )
-        choice = ttk.Combobox(panel, textvariable=variable, values=values, state="readonly", font=BODY)
+        self.login_button.grid(row=0, column=0)
+        self.cancel_login_button = ttk.Button(
+            actions, text="取消登录", command=self._cancel_login, style="Desk.TButton",
+        )
+        self.cancel_login_button.grid(row=0, column=0)
+        self.refresh_models_button = ttk.Button(
+            actions, text="刷新模型", command=self._refresh_models, style="Desk.TButton",
+        )
+        self.refresh_models_button.grid(row=0, column=1, padx=(0, SMALL_GAP))
+        self.logout_button = ttk.Button(
+            actions, text="退出登录", command=self._logout, style="Desk.TButton",
+        )
+        self.logout_button.grid(row=0, column=2)
+        ttk.Label(
+            panel, textvariable=self.chatgpt_status, style="Status.Desk.TLabel", wraplength=WRAP_WIDTH,
+        ).grid(row=1, column=0, sticky="w", pady=(0, GAP))
+
+        parameters = ttk.Frame(panel, style="Desk.TFrame")
+        parameters.grid(row=2, column=0, sticky="ew")
+        parameters.columnconfigure(0, weight=2, uniform="parameters")
+        parameters.columnconfigure(1, weight=1, uniform="parameters")
+        ttk.Label(
+            parameters, text="分析参数", style="Section.Desk.TLabel",
+        ).grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, SMALL_GAP))
+        self.chatgpt_picker = self._choice(
+            parameters, 1, "模型（Model）", self.chatgpt_model, (), right_gap=GAP,
+        )
+        self.chatgpt_picker.bind("<<ComboboxSelected>>", self._model_selected)
+        self.effort_picker = self._choice(
+            parameters, 1, "推理强度（Effort）", self.chatgpt_effort, (), column=1,
+        )
+        ttk.Label(
+            parameters, textvariable=self.effort_hint, style="Status.Desk.TLabel", wraplength=WRAP_WIDTH,
+        ).grid(row=3, column=0, columnspan=2, sticky="w")
+        self._model_selected()
+
+    def _show_provider(self) -> None:
+        self.ai_status.set("")
+        if self.provider.get() == CHATGPT_PROVIDER:
+            self.api_panel.grid_remove()
+            self.chatgpt_panel.grid()
+            if self.chatgpt_account and not self.chatgpt_models and self.task is None:
+                self._refresh_models()
+        else:
+            self.chatgpt_panel.grid_remove()
+            self.api_panel.grid()
+
+    def _choice(
+        self, panel, row, title, variable, values, *, column=0, span=1, right_gap=0,
+    ) -> ttk.Combobox:
+        ttk.Label(panel, text=title, style="Desk.TLabel").grid(
+            row=row, column=column, sticky="w", pady=(0, SMALL_GAP),
+        )
+        choice = ttk.Combobox(
+            panel, textvariable=variable, values=values, state="readonly", font=BODY, style="Desk.TCombobox",
+        )
         choice.grid(
-            row=row + 1, column=0, columnspan=2, sticky="ew", pady=(0, GAP),
+            row=row + 1, column=column, columnspan=span, sticky="ew", padx=(0, right_gap), pady=(0, GAP),
         )
         return choice
 
-    def _setting(self, panel, row, title, variable, *, masked=False) -> None:
+    def _setting(
+        self, panel, row, title, variable, *, column=0, span=1, right_gap=0, masked=False,
+    ) -> None:
         ttk.Label(panel, text=title, style="Desk.TLabel").grid(
-            row=row, column=0, sticky="w", pady=(0, SMALL_GAP),
+            row=row, column=column, sticky="w", pady=(0, SMALL_GAP),
         )
-        ttk.Entry(panel, textvariable=variable, font=BODY, show="•" if masked else "").grid(
-            row=row + 1, column=0, columnspan=2, sticky="ew", pady=(0, GAP),
+        ttk.Entry(
+            panel, textvariable=variable, font=BODY, style="Desk.TEntry", show="•" if masked else "",
+        ).grid(
+            row=row + 1, column=column, columnspan=span, sticky="ew", padx=(0, right_gap), pady=(0, GAP),
         )
 
     def _settings_path(self) -> Path:
@@ -213,14 +344,29 @@ class ConversionWindow:
             for name in ("endpoint", "model"):
                 if isinstance(saved.get(name), str):
                     getattr(self, name).set(saved[name])
+            chatgpt_model = saved.get("chatgpt_model")
+            if isinstance(chatgpt_model, str):
+                self.saved_chatgpt_model = chatgpt_model
+            effort = saved.get("chatgpt_effort")
+            if isinstance(effort, str) and effort in EFFORT_LABELS:
+                self.saved_chatgpt_effort = effort
         except (OSError, ValueError, AttributeError):
             return
 
     def _save_ai_settings(self) -> None:
         path = self._settings_path()
+        selected = self.chatgpt_models.get(self.chatgpt_model.get())
+        chatgpt_model = self.saved_chatgpt_model
+        chatgpt_effort = self.saved_chatgpt_effort
+        if selected is not None:
+            chatgpt_model = selected.slug
+            chatgpt_effort = EFFORT_VALUES.get(self.chatgpt_effort.get(), "")
         values = {
-            "provider": self.provider.get(), "endpoint": self.endpoint.get(),
+            "provider": self.provider.get(),
+            "endpoint": self.endpoint.get(),
             "model": self.model.get(),
+            "chatgpt_model": chatgpt_model,
+            "chatgpt_effort": chatgpt_effort,
         }
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -235,7 +381,9 @@ class ConversionWindow:
         except OSError as error:
             self.ai_status.set(f"无法保存设置。{error}")
         else:
-            self.ai_status.set("连接设置已保存。API Key 仅用于当前会话。")
+            self.saved_chatgpt_model = chatgpt_model
+            self.saved_chatgpt_effort = chatgpt_effort
+            self.ai_status.set("设置已保存。")
 
     def _choose_report(self) -> None:
         filename = filedialog.askopenfilename(parent=self.root, filetypes=REPORT_FILES)
@@ -243,41 +391,115 @@ class ConversionWindow:
             self.report_source.set(filename)
 
     def _login(self) -> None:
-        if self._busy(self.ai_status):
+        if self._busy(self.chatgpt_status):
             return
-        self.ai_status.set("请在浏览器登录并授权 DocumentCraft 使用 ChatGPT 套餐。")
-        self.task = self.worker.submit(sign_in)
-        self._poll_task(self.ai_status, self._signed_in)
+        self.task_label = "等待浏览器授权"
+        self.chatgpt_status.set("请在浏览器完成授权，再返回 DocumentCraft。")
+        self.login_cancel = Event()
+        self.task = self.worker.submit(sign_in, self.login_cancel)
+        self._sync_chatgpt_controls()
+        self._poll_task(self.chatgpt_status, self._signed_in)
+
+    def _cancel_login(self) -> None:
+        if self.login_cancel is not None:
+            self.login_cancel.set()
+            self._sync_chatgpt_controls()
+            self.chatgpt_status.set("正在结束登录等待…")
 
     def _signed_in(self, account: str) -> None:
-        self.provider.set(CHATGPT_PROVIDER)
-        self.ai_status.set(f"已连接 {account}。")
+        self.chatgpt_account = account
         self.root.after_idle(self._refresh_models)
 
     def _refresh_models(self) -> None:
-        if self._busy(self.ai_status):
+        if self._busy(self.chatgpt_status):
             return
-        self.ai_status.set("正在读取 ChatGPT 套餐可用模型…")
+        self.task_label = "读取 ChatGPT 模型"
+        self.chatgpt_status.set("正在读取账号可用的模型…")
         self.task = self.worker.submit(account_models)
-        self._poll_task(self.ai_status, self._show_models)
+        self._sync_chatgpt_controls()
+        self._poll_task(self.chatgpt_status, self._show_models)
 
-    def _show_models(self, models: list[tuple[str, str]]) -> None:
-        self.chatgpt_models = {f"{name} · {slug}": slug for name, slug in models}
+    def _show_models(self, models: list[ChatGPTModel]) -> None:
+        """更新账号目录，按 slug 恢复模型选择。"""
+        previous = self.chatgpt_models.get(self.chatgpt_model.get())
+        preferred_slug = previous.slug if previous is not None else self.saved_chatgpt_model
+        names = Counter(model.display_name for model in models)
+        self.chatgpt_models = {}
+        preferred_label = ""
+        for model in models:
+            label = model.display_name
+            if names[label] > 1:
+                label = f"{label} · {model.slug}"
+            self.chatgpt_models[label] = model
+            if model.slug == preferred_slug:
+                preferred_label = label
         choices = tuple(self.chatgpt_models)
         self.chatgpt_picker.configure(values=choices)
-        if self.chatgpt_model.get() not in self.chatgpt_models:
-            self.chatgpt_model.set(choices[0] if choices else "")
-        self.ai_status.set("ChatGPT 套餐模型已更新。" if choices else "当前 ChatGPT 账号暂无可用模型。")
+        self.chatgpt_model.set(preferred_label or next(iter(choices), ""))
+        if not preferred_label:
+            self.chatgpt_effort.set(EFFORT_LABELS[""])
+        elif previous is None:
+            self.chatgpt_effort.set(EFFORT_LABELS[self.saved_chatgpt_effort])
+        self._model_selected()
+        self.chatgpt_status.set(
+            "报告分析使用当前账号的 ChatGPT 套餐额度。" if choices else "当前账号暂无可用模型。",
+        )
+
+    def _model_selected(self, _event: tk.Event | None = None) -> None:
+        """按所选模型更新推理强度，回退到可用的默认设置。"""
+        model = self.chatgpt_models.get(self.chatgpt_model.get())
+        if model is None:
+            self.effort_picker.configure(values=(), state="disabled")
+            self.chatgpt_effort.set("")
+            self.effort_hint.set("登录并加载模型后可设置分析参数。")
+            return
+        choices = (EFFORT_LABELS[""], *(EFFORT_LABELS[effort] for effort in model.efforts))
+        self.effort_picker.configure(values=choices, state="readonly" if model.efforts else "disabled")
+        if self.chatgpt_effort.get() not in choices:
+            self.chatgpt_effort.set(EFFORT_LABELS[""])
+        if model.efforts:
+            self.effort_hint.set("推理强度越高，分析通常越慢，使用的额度也可能更多。")
+        else:
+            self.effort_hint.set("当前模型使用默认推理设置。")
+
+    def _sync_chatgpt_controls(self) -> None:
+        """根据本机账号和后台任务显示相关操作。"""
+        if self.chatgpt_account:
+            self.chatgpt_connection.set(f"已登录 · {self.chatgpt_account}")
+        elif self.login_cancel is not None:
+            self.chatgpt_connection.set("等待浏览器授权")
+        else:
+            self.chatgpt_connection.set("登录以使用 ChatGPT 套餐")
+        cancel = self.login_cancel
+        waiting = cancel is not None
+        connected = self.chatgpt_account is not None
+        can_cancel = cancel is not None and not cancel.is_set()
+        for button, visible, enabled in (
+            (self.login_button, not connected and not waiting, self.task is None),
+            (self.cancel_login_button, waiting, can_cancel),
+            (self.refresh_models_button, connected, self.task is None),
+            (self.logout_button, connected, self.task is None),
+        ):
+            button.configure(state="normal" if enabled else "disabled")
+            if visible:
+                button.grid()
+            else:
+                button.grid_remove()
+        self.chatgpt_picker.configure(state="readonly" if self.chatgpt_models else "disabled")
 
     def _logout(self) -> None:
-        if self._busy(self.ai_status):
+        if self._busy(self.chatgpt_status):
             return
+        self.task_label = "退出 ChatGPT"
+        self.chatgpt_status.set("正在退出 ChatGPT…")
         self.task = self.worker.submit(sign_out)
-        self._poll_task(self.ai_status, self._signed_out)
+        self._sync_chatgpt_controls()
+        self._poll_task(self.chatgpt_status, self._signed_out)
 
     def _signed_out(self, _result: None) -> None:
+        self.chatgpt_account = None
         self._show_models([])
-        self.ai_status.set("已退出 DocumentCraft 的 ChatGPT 会话。")
+        self.chatgpt_status.set("已退出 DocumentCraft 的 ChatGPT 会话。")
 
     def _start_illustration(self) -> None:
         if self._busy(self.report_status):
@@ -289,12 +511,21 @@ class ConversionWindow:
             return
         provider = PROVIDERS[self.provider.get()]
         model = self.model.get().strip()
+        reasoning_effort = ""
         if provider == "chatgpt":
-            model = self.chatgpt_models.get(self.chatgpt_model.get(), "")
-            if not model:
-                self.report_status.set("请在 AI 设置登录 ChatGPT 并刷新、选择套餐模型。")
+            selected = self.chatgpt_models.get(self.chatgpt_model.get())
+            if selected is None:
+                self.report_status.set("请在「AI 设置」连接 ChatGPT 并选择模型。")
                 return
-        settings = AISettings(provider, self.endpoint.get().strip(), model, self.api_key.get().strip())
+            model = selected.slug
+            reasoning_effort = EFFORT_VALUES.get(self.chatgpt_effort.get(), "")
+        settings = AISettings(
+            provider=provider,
+            endpoint=self.endpoint.get().strip(),
+            model=model,
+            key=self.api_key.get().strip(),
+            reasoning_effort=reasoning_effort,
+        )
         destination = self.endpoint.get().strip() if provider == "api" else RESOURCE
         if not messagebox.askyesno(
             "提交报告分析", f"将报告正文及图片位置发送到 {destination} 进行分析。继续吗？",
@@ -303,10 +534,12 @@ class ConversionWindow:
             return
         self.illustrated_button.state(["disabled"])
         self.review_button.state(["disabled"])
+        self.task_label = "分析报告并绘制配图"
         self.report_status.set("正在分析报告并绘制配图…")
         self.task = self.worker.submit(
             illustrate, Path(filename), settings, colored=ILLUSTRATION_STYLES[style],
         )
+        self._sync_chatgpt_controls()
         self._poll_task(self.report_status, self._illustration_done)
 
     def _illustration_done(self, result: dict) -> None:
@@ -317,8 +550,11 @@ class ConversionWindow:
         self.report_status.set(f"完成。新增 {result['images']} 张图，待确认 {result['issues']} 项。")
 
     def _busy(self, status: tk.StringVar) -> bool:
-        if self.pending is not None or self.task is not None:
-            status.set("已有任务正在进行，请稍候。")
+        if self.task is not None:
+            message = f"当前正在{self.task_label}。"
+            if self.login_cancel is not None:
+                message += "可在「AI 设置」取消登录。"
+            status.set(message)
             return True
         return False
 
@@ -334,6 +570,9 @@ class ConversionWindow:
             status.set(str(error))
         finally:
             self.task = None
+            self.task_label = ""
+            self.login_cancel = None
+            self._sync_chatgpt_controls()
 
     def _file_row(
         self,
@@ -374,7 +613,7 @@ class ConversionWindow:
             self.output.set(filename)
 
     def _start(self) -> None:
-        if self._busy(self.status):
+        if self.pending is not None:
             return
         paths = [value.get().strip() for value in (self.source, self.template, self.output)]
         if not all(paths):
@@ -392,7 +631,7 @@ class ConversionWindow:
         self.open_button.state(["disabled"])
         self.status.set("正在转换，请稍候…")
         # 后台线程只调用核心 API，所有界面状态由主线程更新。
-        self.pending = self.worker.submit(
+        self.pending = self.conversion_worker.submit(
             convert, source, template, output, mode=MODES[self.mode.get()], overwrite=overwrite,
         )
         self.root.after(POLL_MS, self._poll)
@@ -433,6 +672,7 @@ class ConversionWindow:
             messagebox.showinfo("任务正在进行", "任务完成后即可关闭窗口。", parent=self.root)
             return
         self.worker.shutdown(wait=False)
+        self.conversion_worker.shutdown(wait=False)
         self.root.destroy()
 
 

@@ -32,6 +32,8 @@ MARKDOWN = """# 试验结果 {#results}
 
 ![样例图](assets/sample%20image.png){width=4cm}
 
+图 1 试验示意
+
 ## 计算方法
 
 $E = mc^2$
@@ -211,7 +213,7 @@ class ConversionTests(unittest.TestCase):
 
         markdown = "---\ntitle: 工程试验\nlang: zh-CN\n---\n\n" + MARKDOWN
         markdown = markdown.replace(
-            "| 承载力 | 通过 |\n", "| 承载力 | 通过 |\n\n: 试验结果表\n",
+            "| 项目 | 结果 |", "表 1 试验结果\n\n| 项目 | 结果 |",
         )
         source.write_text(markdown, encoding="utf-8")
         self.cli(source, template_path, output)
@@ -219,10 +221,16 @@ class ConversionTests(unittest.TestCase):
         document = Document(output)
         styles_by_text = {p.text: p.style.name for p in document.paragraphs}
         self.assertEqual(styles_by_text["工程试验"], "题目")
-        self.assertEqual(styles_by_text["样例图"], "图名")
-        self.assertEqual(styles_by_text["试验结果表"], "表名")
+        self.assertNotIn("样例图", styles_by_text)
+        self.assertEqual(styles_by_text["图 1 试验示意"], "图名")
+        self.assertEqual(styles_by_text["表 1 试验结果"], "表名")
         figure = next(p for p in document.paragraphs if p._p.xpath(".//w:drawing"))
         self.assertEqual(figure.style.name, "图片")
+        self.assertTrue(figure.paragraph_format.keep_with_next)
+        figure_caption = figure._p.getnext()
+        self.assertEqual("".join(figure_caption.xpath(".//w:t/text()")), "图 1 试验示意")
+        table_caption = document.tables[0]._tbl.getprevious()
+        self.assertEqual("".join(table_caption.xpath(".//w:t/text()")), "表 1 试验结果")
         self.assertEqual(document.tables[0].cell(1, 0).paragraphs[0].style.name, "表格文字")
         self.assertEqual(document.styles["Heading 1"].element.xpath(".//w:numId/@w:val"), ["1"])
         fields = document.element.body.xpath(".//w:sdt//w:instrText/text()")

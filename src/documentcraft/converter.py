@@ -15,6 +15,8 @@ from docx import Document
 from docx.opc.exceptions import PackageNotFoundError
 from lxml.etree import XMLSyntaxError
 
+from .captions import normalize_captions
+
 from .templates import (
     ConversionError,
     apply_template_styles,
@@ -181,6 +183,8 @@ def convert(
     check_images(ast, source.parent)
     if check_only:
         return report
+
+    ast = normalize_captions(ast)
 
     generate_toc = anchor is None and has_toc_placeholder(master)
     options = document_options(ast, generate_toc)

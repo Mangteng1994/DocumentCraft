@@ -15,17 +15,19 @@
 | DC-007 | Could | 模板样式诊断与布局质检 | 报告缺失的语义样式和特殊对象，提供版式保真记录 | 待排期 |
 | DC-008 | Won’t | 旧版 DOC 与 WPS COM | 可通过 WPS 对 DOC 模板和输出进行兼容转换 | 后续文档引擎切片 |
 | DC-009 | Won’t | 本地工作台与模板管理 | Vue 3 / Tauri 2 经 FastAPI 调用核心，SQLite 保存任务和模板元数据 | 后续产品切片 |
-| DC-010 | Must | 科研报告配图 | 全文分析、保留已有图、按技术段落生成 PNG 并回插副本、导出问题清单 | 已实现 · `illustration.py`、`diagrams.py` |
+| DC-010 | Must | 科研报告配图 | 保留已有图的补绘流程；去图重建试点按蓝图分别绘制分层架构、三栏路线和事件时间轴，核对原文依据，按版心回插 DOCX 副本 | 补绘已实现；去图重建试点进行中 |
 | DC-011 | Must | 界面 100% tokenized | 界面自定义设计值全部通过语义 design tokens 引用，规则见 AGENTS.md | 已实现 · `src/documentcraft/gui.py` |
 | DC-012 | Must | Windows x64 单文件 EXE | 仅复制 EXE 即可在 PATH 无 Python 和 Pandoc 的环境中运行转换 | 样例已验收 · `scripts/build-exe.ps1` → `dist/DocumentCraft.exe` |
 | DC-013 | Should | 脚注资源保真 | 两种模板模式保留脚注、外部链接和本地图像，脚注引用指向输出包内正确的资源 | 样例已验收 · `src/documentcraft/templates.py` |
-| DC-014 | Must | 「我的文档模板」样式转换 | 中文语言标签可转换，模板的题目、图名、表名、图片及表格文字样式生效，保留标题编号定义并生成目录域 | 用户模板已验收 · `src/documentcraft/converter.py`、`src/documentcraft/templates.py` |
+| DC-014 | Must | 「我的文档模板」样式转换 | 中文语言标签可转换，模板的题目、图名、表名、图片及表格文字样式生效，保留标题编号定义并生成目录域；各节的普通正文统一使用模板的「正文」样式 | 正文样式修复已实现并打包 · `src/documentcraft/templates.py`；本次修复未测试 |
 | DC-015 | Must | 转换桌面界面 | 双击同一 EXE 可选择源文件、模板和输出，并在界面完成转换 | 已验收 · 发布 EXE 无参启动和界面转换冒烟验证通过 |
 | DC-016 | Must | 整表居中 | Markdown 表格按版心居中，优先保留模板明确指定的表格对齐 | 已验收 · WPS 对齐属性检查和页面渲染通过 |
-| DC-017 | Must | AI 连接 | 配置兼容 API 或通过官方 Sign in with ChatGPT 授权，直接使用 ChatGPT 套餐分析 | 已实现 · `siwc.py`，新版 EXE 启动通过，真实账号授权和推理待验收 |
-| DC-018 | Must | 桌面功能导航 | 转换、配图和 AI 设置分区，保持单文件 EXE 与设计令牌 | 已实现 · `gui.py`；隔离目录 EXE 启动已检查 |
+| DC-017 | Must | AI 连接 | 配置兼容 API 或通过官方 Sign in with ChatGPT 授权。ChatGPT 模型和推理强度可分别选择、保存和恢复，分析请求分别发送 `model` 和所选的 `reasoning.effort` | 已实现 · `gui.py`、`ai.py`、`siwc.py`；本轮未测试 |
+| DC-018 | Must | 桌面功能导航 | 转换、配图和 AI 设置分区。AI 设置按连接方式显示对应表单，登录状态、账号操作和分析参数分区，设计值引用语义令牌 | 已实现 · `gui.py`；本轮未测试 |
 | DC-019 | Won’t | HTML 转 PPT | 可在导航中独立接入 HTML 转 PPT 工作流 | 后续切片 |
 | DC-020 | Must | 双击无控制台 | 桌面单文件 EXE 使用 Windows GUI 子系统，命令行构建保留标准输入输出 | 已验证 · 桌面版启动正常，命令行版返回预检查 JSON |
+| DC-021 | Must | 图表题注识别 | 图片替代文字不充当图名，图名在图下，表名在表上并采用模板题注样式；识别紧邻表格的无编号独立短标题，包括列表末项因缩进产生的独立续段 | 已实现并打包 · `captions.py`、`templates.py`；本次修复未测试 |
+| DC-022 | Must | 登录等待可取消 | 明确显示等待授权，可取消，后台登录不阻塞 Word 转换 | 已实现并打包 · `gui.py`、`siwc.py` |
 
 ## 界面开发约束
 

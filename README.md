@@ -14,9 +14,9 @@
 
 ## 科研配图
 
-在「AI 设置」选连接方式。「API Key」使用兼容 `/chat/completions` 且支持 JSON 输出的服务，可配置地址和模型。Key 可在窗口中输入，或从 `OPENAI_API_KEY` 读取。保存设置只保存连接方式、地址和模型。
+在「AI 设置」选连接方式。「兼容 API」使用兼容 `/chat/completions` 且支持 JSON 输出的服务，可配置地址和模型。Key 可在窗口中输入，或从 `OPENAI_API_KEY` 读取，窗口中输入的 Key 仅用于当前会话。
 
-点击「Sign in with ChatGPT」，在系统浏览器登录并授权 DocumentCraft 使用套餐额度。OpenAI 在首次授权时动态发放 Client ID，应用用 Windows DPAPI 加密保存会话。登录后从「ChatGPT 套餐模型」选择模型，已有会话可点击「刷新模型」。此连接通过公开 Responses API 分析正文，由本地程序绘制 PNG。[官方桌面登录流程](https://developers.openai.com/siwc/token-sharing-open-source/sign-in)
+选择「ChatGPT 套餐」，点击「Continue with ChatGPT」，在系统浏览器登录并授权 DocumentCraft 使用套餐额度。应用用 Windows DPAPI 加密保存会话。登录后，在「分析参数」分别选择模型和推理强度。可选强度随模型变化，选择「模型默认」时由服务端决定。点击「保存设置」可在下次启动时恢复选择。此连接通过公开 Responses API 分析正文，由本地程序绘制 PNG。[官方桌面登录流程](https://developers.openai.com/siwc/token-sharing-open-source/sign-in)
 
 在「科研配图」选择报告和黑白或分区配色风格，然后开始分析。程序在确认后向所选服务提交报告文本和图片位置标记。结果包括源目录中的配图版报告、PNG 资源目录和其中的 `审核清单.md`。旧版 DOC 需要本机 WPS，配图版输出 DOCX。已有图片以位置、图题和报告上下文判断覆盖范围。无法确定的关系、覆盖范围和当前布局无法呈现的回路列入审核清单。
 
@@ -34,7 +34,9 @@ Markdown 文件使用 UTF-8 编码。图片使用本地路径，相对路径以 
 
 处理正式模板时可显式指定 `--template-mode full`，使锚点缺失直接报错。模板样式以 Pandoc 支持的 Word 样式名称为准，例如 `Heading 1`。正文与脚注支持本地图像和超链接。复杂 Word 对象的版式以实际模板验收为准。
 
-样式模板含 Word 目录内容控件时，输出生成可更新的目录域。中文 Markdown 可在 YAML 中声明 `lang: zh-CN`。当模板采用「题目」「图名」「表名」「图片」或「表格文字」等中文角色样式时，转换器会应用对应样式。样式模板中的示例题注字段属于参考正文，输出图表题注使用 Markdown 中的文字。
+样式模板含 Word 目录内容控件时，输出生成可更新的目录域。中文 Markdown 可在 YAML 中声明 `lang: zh-CN`。各节的普通正文段落统一使用模板的「正文」样式。当模板采用「题目」「图名」「表名」「图片」或「表格文字」等中文角色样式时，转换器会应用对应样式。
+
+图名写在图片后，格式如 `图 1 技术路线`。表名可写成紧邻表格的独立段落，如 `表 1 试验结果` 或 `专利名字`，也支持 Pandoc 的 `: 表名` 语法。无编号表名按单行纯文本短标题识别，最多 50 个字符。输出保留原题注文字和编号。图片链接内方括号的文字用于替代文本，缺少独立图名时只插入图片。
 
 ### 预检查
 
