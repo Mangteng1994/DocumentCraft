@@ -1,7 +1,8 @@
 param(
     [string]$Python = (Join-Path $PSScriptRoot '..\.venv\Scripts\python.exe'),
     [string]$Pandoc = (Get-Command pandoc.exe -ErrorAction Stop).Source,
-    [switch]$Console
+    [switch]$Console,
+    [string]$DesktopOutput = 'dist'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -17,7 +18,7 @@ $copying = Join-Path $pandocDir 'COPYING.rtf'
 Push-Location (Join-Path $PSScriptRoot '..')
 try {
     # GUI and CLI builds use separate Windows subsystems and output directories.
-    $entryArgs = @('--windowed', '--name', 'DocumentCraft', '--distpath', 'dist', 'src/documentcraft/gui.py')
+    $entryArgs = @('--windowed', '--name', 'DocumentCraft', '--distpath', $DesktopOutput, 'src/documentcraft/gui.py')
     if ($Console) {
         $entryArgs = @(
             '--console', '--name', 'DocumentCraft-cli', '--distpath', 'dist-cli',

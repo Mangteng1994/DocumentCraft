@@ -6,6 +6,7 @@ from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 from tempfile import NamedTemporaryFile
+from threading import Event
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
@@ -51,9 +52,12 @@ class ConversionWindow:
         self.mode = tk.StringVar(root, value=next(iter(MODES)))
         self.status = tk.StringVar(root, value="请选择 Markdown 文件和 DOCX 模板。")
         self.worker = ThreadPoolExecutor(max_workers=1)
+        self.conversion_worker = ThreadPoolExecutor(max_workers=1)
         self.pending: Future[dict[str, str]] | None = None
         self.result: Path | None = None
         self.task: Future | None = None
+        self.task_label = ""
+        self.login_cancel: Event | None = None
         self.report_source = tk.StringVar(root)
         self.report_style = tk.StringVar(root)
         self.report_status = tk.StringVar(root, value="选定报告和绘图风格后开始。")
@@ -176,6 +180,10 @@ class ConversionWindow:
             ttk.Button(actions, text=label, command=command, style="Desk.TButton").pack(
                 side="left", padx=(0, GAP),
             )
+        self.cancel_login_button = ttk.Button(
+            actions, text="取消登录", command=self._cancel_login, style="Desk.TButton", state="disabled",
+        )
+        self.cancel_login_button.pack(side="left")
         ttk.Label(
             panel, textvariable=self.ai_status, style="Status.Desk.TLabel", wraplength=WRAP_WIDTH,
         ).grid(row=12, column=0, columnspan=2, sticky="w")
@@ -245,9 +253,18 @@ class ConversionWindow:
     def _login(self) -> None:
         if self._busy(self.ai_status):
             return
-        self.ai_status.set("请在浏览器登录并授权 DocumentCraft 使用 ChatGPT 套餐。")
-        self.task = self.worker.submit(sign_in)
+        self.task_label = "等待浏览器授权"
+        self.ai_status.set("等待浏览器授权。已有授权可取消登录，再点击「刷新模型」。")
+        self.login_cancel = Event()
+        self.cancel_login_button.state(["!disabled"])
+        self.task = self.worker.submit(sign_in, self.login_cancel)
         self._poll_task(self.ai_status, self._signed_in)
+
+    def _cancel_login(self) -> None:
+        if self.login_cancel is not None:
+            self.login_cancel.set()
+            self.cancel_login_button.state(["disabled"])
+            self.ai_status.set("正在结束登录等待…")
 
     def _signed_in(self, account: str) -> None:
         self.provider.set(CHATGPT_PROVIDER)
@@ -257,6 +274,7 @@ class ConversionWindow:
     def _refresh_models(self) -> None:
         if self._busy(self.ai_status):
             return
+        self.task_label = "读取 ChatGPT 模型"
         self.ai_status.set("正在读取 ChatGPT 套餐可用模型…")
         self.task = self.worker.submit(account_models)
         self._poll_task(self.ai_status, self._show_models)
@@ -272,6 +290,7 @@ class ConversionWindow:
     def _logout(self) -> None:
         if self._busy(self.ai_status):
             return
+        self.task_label = "退出 ChatGPT"
         self.task = self.worker.submit(sign_out)
         self._poll_task(self.ai_status, self._signed_out)
 
@@ -303,6 +322,7 @@ class ConversionWindow:
             return
         self.illustrated_button.state(["disabled"])
         self.review_button.state(["disabled"])
+        self.task_label = "分析报告并绘制配图"
         self.report_status.set("正在分析报告并绘制配图…")
         self.task = self.worker.submit(
             illustrate, Path(filename), settings, colored=ILLUSTRATION_STYLES[style],
@@ -317,8 +337,11 @@ class ConversionWindow:
         self.report_status.set(f"完成。新增 {result['images']} 张图，待确认 {result['issues']} 项。")
 
     def _busy(self, status: tk.StringVar) -> bool:
-        if self.pending is not None or self.task is not None:
-            status.set("已有任务正在进行，请稍候。")
+        if self.task is not None:
+            message = f"当前正在{self.task_label}。"
+            if self.login_cancel is not None:
+                message += "可在「AI 设置」取消登录。"
+            status.set(message)
             return True
         return False
 
@@ -334,6 +357,9 @@ class ConversionWindow:
             status.set(str(error))
         finally:
             self.task = None
+            self.task_label = ""
+            self.login_cancel = None
+            self.cancel_login_button.state(["disabled"])
 
     def _file_row(
         self,
@@ -374,7 +400,7 @@ class ConversionWindow:
             self.output.set(filename)
 
     def _start(self) -> None:
-        if self._busy(self.status):
+        if self.pending is not None:
             return
         paths = [value.get().strip() for value in (self.source, self.template, self.output)]
         if not all(paths):
@@ -392,7 +418,7 @@ class ConversionWindow:
         self.open_button.state(["disabled"])
         self.status.set("正在转换，请稍候…")
         # 后台线程只调用核心 API，所有界面状态由主线程更新。
-        self.pending = self.worker.submit(
+        self.pending = self.conversion_worker.submit(
             convert, source, template, output, mode=MODES[self.mode.get()], overwrite=overwrite,
         )
         self.root.after(POLL_MS, self._poll)
@@ -433,6 +459,7 @@ class ConversionWindow:
             messagebox.showinfo("任务正在进行", "任务完成后即可关闭窗口。", parent=self.root)
             return
         self.worker.shutdown(wait=False)
+        self.conversion_worker.shutdown(wait=False)
         self.root.destroy()
 
 

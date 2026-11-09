@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import secrets
 from tempfile import NamedTemporaryFile
+from threading import Event
 import time
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, urlencode, urlsplit
@@ -121,7 +122,7 @@ def _session_from_tokens(tokens: dict, previous: dict) -> dict:
             "expires_at": time.time() + expires}
 
 
-def sign_in() -> str:
+def sign_in(cancel: Event | None = None) -> str:
     """在系统浏览器授权，通过 loopback 接收一次性授权码。"""
     state = secrets.token_urlsafe(32)
     nonce = secrets.token_urlsafe(32)
@@ -175,10 +176,16 @@ def sign_in() -> str:
             raise ConversionError("无法打开默认浏览器。")
         deadline = time.monotonic() + 180
         while not result and time.monotonic() < deadline:
+            if cancel is not None and cancel.is_set():
+                raise ConversionError("已取消等待 ChatGPT 登录。")
             listener.handle_request()
 
+    if cancel is not None and cancel.is_set():
+        raise ConversionError("已取消等待 ChatGPT 登录。")
+    if not result:
+        raise ConversionError("等待浏览器授权超时。请重试，已有授权可直接刷新模型。")
     if result.get("error") or not result.get("code"):
-        raise ConversionError("ChatGPT 授权未完成，可能已取消或超时。")
+        raise ConversionError("浏览器未完成 ChatGPT 授权。请重试。")
     client_id = result["client_id"] or issued_client
     if not client_id or client_id == "dynamic_agent_client" or (issued_client and client_id != issued_client):
         raise ConversionError("ChatGPT 没有返回匹配的应用注册 ID。")
@@ -202,6 +209,8 @@ def sign_in() -> str:
         "client_id": client_id, "id_token": id_token,
         "subject": identity["sub"], "email": identity.get("email", ""),
     })
+    if cancel is not None and cancel.is_set():
+        raise ConversionError("已取消等待 ChatGPT 登录。")
     _save_session(session)
     return session["email"] or "ChatGPT 账号"
 

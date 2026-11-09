@@ -17,21 +17,54 @@ MARGIN = 40
 FONT_SIZE = 27
 LINE_WIDTH = 3
 ARROW_LENGTH = 16
+RETURN_GAP = 22
 PALETTE = (
     ("#E4F1FB", "#2D6596"), ("#E7F3E8", "#3B7552"), ("#FAEEDC", "#9C651F"),
     ("#EEE8F8", "#705290"), ("#F6E8EB", "#984F62"), ("#E1F1EF", "#357A74"),
 )
 
 
+def _return_edges(adjacency: list[list[int]]) -> set[tuple[int, int]]:
+    """找出指回当前遍历路径的边，单独走回流通道。"""
+    visited = set()
+    active = set()
+    returns = set()
+    for root in range(len(adjacency)):
+        if root in visited:
+            continue
+        visited.add(root)
+        active.add(root)
+        stack = [(root, iter(adjacency[root]))]
+        while stack:
+            source, targets = stack[-1]
+            target = next(targets, None)
+            if target is None:
+                stack.pop()
+                active.remove(source)
+            elif target in active:
+                returns.add((source, target))
+            elif target not in visited:
+                visited.add(target)
+                active.add(target)
+                stack.append((target, iter(adjacency[target])))
+    return returns
+
+
 def render_diagram(diagram: dict, output: Path, colored: bool) -> None:
     """按拓扑层绘图，图中只使用计划里的节点标签。"""
     nodes = diagram["nodes"]
     edges = diagram["edges"]
+    adjacency = [[] for _ in nodes]
+    for edge in edges:
+        adjacency[edge["from"]].append(edge["to"])
+    returns = _return_edges(adjacency)
     incoming = [0] * len(nodes)
     outgoing = defaultdict(list)
     for edge in edges:
-        incoming[edge["to"]] += 1
-        outgoing[edge["from"]].append(edge["to"])
+        source, target = edge["from"], edge["to"]
+        if (source, target) not in returns:
+            incoming[target] += 1
+            outgoing[source].append(target)
     frontier = [index for index, degree in enumerate(incoming) if degree == 0]
     layers = []
     while frontier:
@@ -43,12 +76,10 @@ def render_diagram(diagram: dict, output: Path, colored: bool) -> None:
                 if incoming[target] == 0:
                     next_layer.append(target)
         frontier = next_layer
-    if any(incoming):
-        raise ConversionError("关系图包含回路，当前排版无法可靠显示。")
-
     rows = max(map(len, layers))
     width = 2 * MARGIN + len(layers) * BOX_WIDTH + (len(layers) - 1) * COLUMN_GAP
-    height = 2 * MARGIN + rows * BOX_HEIGHT + (rows - 1) * ROW_GAP
+    content_bottom = MARGIN + rows * BOX_HEIGHT + (rows - 1) * ROW_GAP
+    height = content_bottom + MARGIN + len(returns) * RETURN_GAP
     if width * height > 30_000_000:
         raise ConversionError("图幅过大，需人工确认布局。")
     font_dir = Path(os.environ.get("WINDIR", "C:/Windows")) / "Fonts"
@@ -62,13 +93,23 @@ def render_diagram(diagram: dict, output: Path, colored: bool) -> None:
             offset = (rows - len(layer)) * (BOX_HEIGHT + ROW_GAP) // 2
             top = MARGIN + offset + row * (BOX_HEIGHT + ROW_GAP)
             positions[node] = (left, top)
+    return_count = 0
     for edge in edges:
         x1, y1 = positions[edge["from"]]
         x2, y2 = positions[edge["to"]]
         start = (x1 + BOX_WIDTH, y1 + BOX_HEIGHT // 2)
         end = (x2 - LINE_WIDTH, y2 + BOX_HEIGHT // 2)
         # 连线通过列间走廊走线，避免长跨列线穿过其他节点。
-        if x2 - start[0] > COLUMN_GAP:
+        if (edge["from"], edge["to"]) in returns:
+            return_count += 1
+            lane = content_bottom + return_count * RETURN_GAP
+            start = (x1, y1 + BOX_HEIGHT // 2)
+            end = (x2 + BOX_WIDTH + LINE_WIDTH, y2 + BOX_HEIGHT // 2)
+            exit_x = start[0] - MARGIN // 2
+            entry_x = end[0] + MARGIN // 2
+            route = [start, (exit_x, start[1]), (exit_x, lane),
+                     (entry_x, lane), (entry_x, end[1]), end]
+        elif x2 - start[0] > COLUMN_GAP:
             lane = MARGIN // 2
             route = [start, (start[0] + MARGIN, start[1]),
                      (start[0] + MARGIN, lane), (end[0] - MARGIN, lane),
