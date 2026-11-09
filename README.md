@@ -31,7 +31,19 @@ npm install
 npx tauri dev
 ```
 
-编辑器按以下顺序寻找 `docflow`：环境变量 `DOCUMENTCRAFT_DOCFLOW` 指定的可执行文件；编辑器同目录的 `DocumentCraft-cli.exe`；仓库根目录 `.venv` 中的 Python（以 `-m documentcraft` 运行 `src/`）。安装包打包（DC-038）尚未排期。
+编辑器按以下顺序寻找 `docflow`：环境变量 `DOCUMENTCRAFT_DOCFLOW` 指定的可执行文件；编辑器同目录的 `DocumentCraft-cli.exe`；仓库根目录 `.venv` 中的 Python（以 `-m documentcraft` 运行 `src/`）。
+
+### 打安装包
+
+先打包 sidecar，再生成 NSIS 安装包。安装包把 `DocumentCraft-cli.exe` 装在编辑器旁边，Python 运行时和 Pandoc 随 sidecar 内置。sidecar 只在 `tauri.bundle.conf.json` 中声明，开发模式不会复制它，仍直接运行 `src/` 源码。
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-exe.ps1
+cd app
+npm run bundle
+```
+
+安装包位于 `app/src-tauri/target/release/bundle/nsis/`。目标机器需要 WebView2 Runtime，Windows 11 已自带。
 
 ### sidecar 接口
 

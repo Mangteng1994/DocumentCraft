@@ -58,7 +58,7 @@
 
 | ID | 功能 | 验收条件 | 状态与实现 |
 | --- | --- | --- | --- |
-| DC-038 | 编辑器安装包 | Tauri 打包含 `docflow` sidecar 的 Windows 安装包 | 待排期 · 本轮以源码运行 |
+| DC-038 | 编辑器安装包 | Tauri 打包含 `docflow` sidecar 的 Windows 安装包 | 已实现 · 部分验收。`npm run bundle` 生成 `DocumentCraft_0.2.0_x64-setup.exe`；release 版可启动，sidecar 在隔离 PATH 下转换通过；安装包未实际安装 |
 | DC-008 | 旧版 DOC 与 WPS COM | 可通过 WPS 对 DOC 模板和输出进行兼容转换 | 后续文档引擎切片 |
 | DC-009 | 本地工作台与模板管理 | Vue 3 / Tauri 2 经 FastAPI 调用核心，SQLite 保存任务和模板元数据 | 后续产品切片 |
 | DC-019 | HTML 转 PPT | 可在导航中独立接入 HTML 转 PPT 工作流 | 后续切片 |
@@ -154,3 +154,9 @@ foreach ($step in 'save','reopen','style','full','skip','plain') {
 - Markdown 往返（DC-029）：用编辑器同一 schema 在 Node 中验证。CRLF 文件保存后保持 CRLF，二次保存无变化。frontmatter、脚注、公式、引用式链接、任务项、图片和代码块原样保留；表格列宽对齐和提示块标记后的空引用行按 VMark 规范写法改写，与 VMark 自身的往返基准一致。验收中补上了 VMark 的换行符与硬换行写法保留逻辑（`linebreakDetection.ts`）。
 - 界面（DC-030 至 DC-036）：在浏览器中加载真实 `App`，用 Tauri 官方 `mockIPC` 模拟 IPC。验证了打开工作区与文件树、大纲层级/过滤/跳转、选区批注的锚点（与 Python 端一致）、高亮与选中、编辑后原文消失时显示「待定位」、撤销后恢复、导出对话框的待定位提示与跳过、Copilot 仅发送勾选摘录且来源可跳回、编辑后 `Ctrl+S` 写回的 Markdown、切换文档时的保存提示，以及 AI 设置和科研配图对话框。修复了 frontmatter 换行被 TipTap 样式覆盖、任务项勾选与提示块类型不显示、脚注编号单独占行、绝对图片路径判断缺少反斜杠四处问题。
 - 未执行：原生窗口内的逐项点击、真实 AI 请求（Copilot 整理、科研配图、ChatGPT 登录）、WPS 打开导出文件。
+
+## 2026-11-09 安装包
+
+- `scripts/build-exe.ps1` 打包 sidecar 时显式加入 `sqlite3.dll`。conda 版 Python 把它放在 `Libraryin`，此前漏打，EXE 一启动就报 DLL load failed。脚本改回纯 ASCII 注释：Windows PowerShell 5.1 按 ANSI 代码页读取无 BOM 的 UTF-8，中文注释会吞掉下一行。
+- sidecar 复制到只含 `System32` 的 PATH 环境中运行，`notes list` 与带批注的 `md-to-word` 均成功。
+- `npm run bundle` 使用 `tauri.bundle.conf.json`，只在安装包中带上 sidecar，开发模式仍运行 `src/` 源码。NSIS 脚本把 `DocumentCraft-cli.exe` 安装到编辑器同目录。release 版直接启动，窗口正常加载。安装、卸载流程未在本机执行。

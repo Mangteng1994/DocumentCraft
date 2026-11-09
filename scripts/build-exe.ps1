@@ -4,7 +4,7 @@ param(
     [string]$Output = 'dist-cli'
 )
 
-# 打包 docflow 命令行版。阅读编辑器以它作为 sidecar，后续 Tauri 安装包也从这里取 EXE。
+# Build the docflow CLI. The reading editor runs it as a sidecar and its installer bundles this EXE.
 $ErrorActionPreference = 'Stop'
 $pythonExe = (Get-Command $Python -ErrorAction Stop).Source
 $pandocExe = (Resolve-Path -LiteralPath $Pandoc).Path
@@ -15,6 +15,19 @@ $pandocDir = Split-Path -Parent $pandocExe
 $copyright = Join-Path $pandocDir 'COPYRIGHT.txt'
 $copying = Join-Path $pandocDir 'COPYING.rtf'
 
+# Notes storage needs _sqlite3. Conda Pythons keep sqlite3.dll in Library\bin, which PyInstaller
+# does not collect, and the EXE then fails at startup with "DLL load failed". Bundle it explicitly.
+# Keep this file ASCII: Windows PowerShell 5.1 reads BOM-less UTF-8 as the ANSI code page.
+$basePrefix = & $pythonExe -c 'import sys; print(sys.base_prefix)'
+$sqliteCandidates = @(
+    (Join-Path $basePrefix 'DLLs\sqlite3.dll'),
+    (Join-Path $basePrefix 'Library\bin\sqlite3.dll')
+)
+$sqliteDll = $sqliteCandidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+if (-not $sqliteDll) {
+    throw "sqlite3.dll not found under $basePrefix."
+}
+
 Push-Location (Join-Path $PSScriptRoot '..')
 try {
     $buildArgs = @(
@@ -23,6 +36,7 @@ try {
         '--paths', 'src', '--specpath', 'build', '--workpath', 'build',
         '--collect-data', 'docx', '--collect-data', 'docxcompose', '--collect-data', 'babel',
         '--add-binary', "${pandocExe}:engine", '--add-data', "${copyright}:engine", '--add-data', "${copying}:engine",
+        '--add-binary', "${sqliteDll}:.",
         'src/documentcraft/__main__.py'
     )
     & $pythonExe -m PyInstaller @buildArgs
