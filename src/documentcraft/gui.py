@@ -2,6 +2,8 @@
 
 import os
 import json
+import subprocess
+import sys
 from collections import Counter
 from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
@@ -11,9 +13,10 @@ from threading import Event
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
-from documentcraft.ai import AISettings, DEFAULT_ENDPOINT, DEFAULT_MODEL
+from documentcraft.ai import AISettings, DEFAULT_ENDPOINT, DEFAULT_MODEL, settings_path
 from documentcraft.converter import TemplateMode, convert
 from documentcraft.illustration import illustrate
+from documentcraft.reader_assistant import READER_SETTINGS_ENV
 from documentcraft.siwc import RESOURCE, ChatGPTModel, account_models, saved_account, sign_in, sign_out
 from documentcraft.templates import ConversionError
 
@@ -132,6 +135,7 @@ class ConversionWindow:
         tabs = ttk.Notebook(self.root)
         tabs.pack(fill="both", expand=True, padx=GAP, pady=GAP)
         self._build_form(self._new_tab(tabs, "Markdown 转 Word"))
+        self._build_reader(self._new_tab(tabs, "Markdown 阅读器"))
         self._build_illustration(self._new_tab(tabs, "科研配图"))
         self._build_ai(self._new_tab(tabs, "AI 设置"))
 
@@ -143,6 +147,49 @@ class ConversionWindow:
             row=0, column=0, columnspan=2, sticky="w", pady=(0, GAP),
         )
         return panel
+
+    def _build_reader(self, panel: ttk.Frame) -> None:
+        ttk.Label(
+            panel, text="阅读 Markdown、选中文字批注，并将审阅结果导出为 Word。",
+            style="Status.Desk.TLabel", wraplength=WRAP_WIDTH,
+        ).grid(row=1, column=0, sticky="w", pady=(0, GAP))
+        ttk.Button(panel, text="打开 Markdown", command=self._open_reader, style="Convert.TButton").grid(
+            row=2, column=0, sticky="w", pady=(0, GAP),
+        )
+        ttk.Button(panel, text="打开工作区文件夹", command=self._open_reader_folder, style="Desk.TButton").grid(
+            row=3, column=0, sticky="w",
+        )
+
+    def _open_reader(self) -> None:
+        filename = filedialog.askopenfilename(parent=self.root, filetypes=MARKDOWN_FILES)
+        if filename:
+            self._launch_reader([filename])
+
+    def _open_reader_folder(self) -> None:
+        directory = filedialog.askdirectory(parent=self.root, mustexist=True)
+        if directory:
+            self._launch_reader(["--workspace", directory])
+
+    def _launch_reader(self, arguments: list[str]) -> None:
+        env = os.environ.copy()
+        model = self.chatgpt_models.get(self.chatgpt_model.get())
+        env[READER_SETTINGS_ENV] = json.dumps({
+            "provider": self.provider.get(), "endpoint": self.endpoint.get(), "model": self.model.get(),
+            "key": self.api_key.get().strip(),
+            "chatgpt_model": model.slug if model else self.saved_chatgpt_model,
+            "chatgpt_effort": EFFORT_VALUES.get(self.chatgpt_effort.get(), "") if model else self.saved_chatgpt_effort,
+        })
+        if getattr(sys, "frozen", False):
+            # 让阅读器独立持有自己的单文件资源，关闭工作台时可以继续阅读。
+            env["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
+            command = [sys.executable, "--reader", *arguments]
+        else:
+            command = [sys.executable, "-m", "documentcraft.reader", *arguments]
+        try:
+            flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+            subprocess.Popen(command, env=env, creationflags=flags)
+        except OSError as error:
+            messagebox.showerror("无法打开阅读器", str(error), parent=self.root)
 
     def _build_form(self, panel: ttk.Frame) -> None:
         self._file_row(panel, 1, "Markdown 文件", self.source, self._choose_source)
@@ -329,13 +376,9 @@ class ConversionWindow:
             row=row + 1, column=column, columnspan=span, sticky="ew", padx=(0, right_gap), pady=(0, GAP),
         )
 
-    def _settings_path(self) -> Path:
-        base = Path(os.environ.get("LOCALAPPDATA") or Path.home())
-        return base / "DocumentCraft" / "ai-settings.json"
-
     def _load_ai_settings(self) -> None:
         try:
-            saved = json.loads(self._settings_path().read_text(encoding="utf-8"))
+            saved = json.loads(settings_path().read_text(encoding="utf-8"))
             provider = saved.get("provider")
             if provider == "ChatGPT（Codex CLI）":
                 provider = CHATGPT_PROVIDER
@@ -354,7 +397,7 @@ class ConversionWindow:
             return
 
     def _save_ai_settings(self) -> None:
-        path = self._settings_path()
+        path = settings_path()
         selected = self.chatgpt_models.get(self.chatgpt_model.get())
         chatgpt_model = self.saved_chatgpt_model
         chatgpt_effort = self.saved_chatgpt_effort
@@ -684,4 +727,15 @@ def launch() -> None:
 
 
 if __name__ == "__main__":
-    launch()
+    if sys.argv[1:2] == ["--reader"]:
+        from documentcraft.reader import main
+
+        try:
+            main(sys.argv[2:])
+        except Exception as error:
+            root = tk.Tk()
+            root.withdraw()
+            messagebox.showerror("无法打开阅读器", str(error), parent=root)
+            root.destroy()
+    else:
+        launch()

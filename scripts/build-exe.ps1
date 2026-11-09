@@ -25,6 +25,14 @@ try {
             'src/documentcraft/__main__.py'
         )
     }
+    else {
+        $readerAssets = (Resolve-Path -LiteralPath 'src/documentcraft/reader_ui').Path
+        $entryArgs = @(
+            '--collect-data', 'webview',
+            '--hidden-import', 'webview.platforms.winforms',
+            '--add-data', "${readerAssets}:documentcraft/reader_ui"
+        ) + $entryArgs
+    }
     $buildArgs = @(
         '--noconfirm', '--onefile', '--noupx',
         '--paths', 'src', '--specpath', 'build', '--workpath', 'build',

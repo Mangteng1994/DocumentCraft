@@ -12,6 +12,14 @@
 .\dist-cli\DocumentCraft-cli.exe md-to-word --input "报告.md" --template "科研报告模板.docx" --output "报告.docx"
 ```
 
+## Markdown 阅读器
+
+在桌面工作台的「Markdown 阅读器」中打开文件。阅读窗口可切换工作区、浏览目录和文件，通过大纲跳到标题。正文支持常见 Markdown 排版及工作区内的本地位图。Windows 需要 Microsoft Edge WebView2 Runtime。
+
+选中文字后写批注。批注保存在工作区的 `.documentcraft/reader-spike.sqlite3`，可以继续打开原有 Spike 数据。Markdown 源文件保持只读。选择「导出 DOCX」可用样式模板或完整模板生成 WPS 可编辑的 Word 批注。遇到待定位或当前不支持导出的批注，界面会先提示，用户可明确跳过。分享按钮将当前 Markdown 和这篇文档的批注打成一个 ZIP，收件人解压后用阅读器打开其中的 Markdown。外部附件另行传递。
+
+「AI 整理」复用工作台选定的 AI 服务。先本地检索当前工作区的 Markdown，查看摘录后再生成整理稿。只有确认的摘录及问题会发给所选服务。来源可跳回工作区内对应文件。若更换连接设置，重新打开阅读器以应用当前设置。
+
 ## 科研配图
 
 在「AI 设置」选连接方式。「兼容 API」使用兼容 `/chat/completions` 且支持 JSON 输出的服务，可配置地址和模型。Key 可在窗口中输入，或从 `OPENAI_API_KEY` 读取，窗口中输入的 Key 仅用于当前会话。

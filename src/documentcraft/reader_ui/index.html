@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DocumentCraft · Markdown 阅读器</title>
+  <style>/* reader.css */</style>
+</head>
+<body aria-busy="false">
+  <header class="app-bar">
+    <div class="app-bar__title">
+      <strong class="brand">DocumentCraft</strong>
+      <small id="path" class="file-path"></small>
+    </div>
+    <div class="actions" role="toolbar" aria-label="文档操作">
+      <button id="reload" class="button button--quiet" type="button">重新读取</button>
+      <button id="share" class="button" type="button" disabled>打包 Markdown 与批注</button>
+      <span class="actions__divider" aria-hidden="true"></span>
+      <label class="toggle"><input type="checkbox" id="include-notes" checked> 包含批注</label>
+      <button id="export" class="button button--primary" type="button" disabled>导出 DOCX</button>
+    </div>
+  </header>
+  <main class="workspace">
+    <nav id="outline-panel" class="outline" aria-label="工作区和文档大纲">
+      <details id="workspace-files" class="navigation-group" open>
+        <summary class="section-title" id="workspace-name">工作区</summary>
+        <div class="navigation-actions">
+          <button id="open-file" class="button button--small" type="button">打开文件</button>
+          <button id="open-folder" class="button button--small" type="button">打开文件夹</button>
+        </div>
+        <input id="file-filter" class="navigation-filter" type="search" aria-label="筛选工作区文件" placeholder="筛选目录与文件">
+        <p id="files-empty" class="notes__empty" hidden>没有匹配的文件。</p>
+        <ul id="file-tree" class="file-tree"></ul>
+      </details>
+      <details class="navigation-group" open>
+        <summary class="section-title" id="outline-title">文档大纲 <small id="outline-count" class="count"></small></summary>
+        <p id="outline-empty" class="notes__empty" hidden>文档没有标题。</p>
+        <ol id="outline" class="outline__list"></ol>
+      </details>
+    </nav>
+    <section id="reading-pane" class="reading-pane" aria-label="正文阅读区">
+      <!-- 提示放在 #document 之外：验收脚本按 #document p 计数正文段落。 -->
+      <p id="pane-message" class="pane-message">正在载入文档…</p>
+      <article id="document" class="paper" aria-label="Markdown 正文"></article>
+    </section>
+    <aside class="sidebar" aria-label="批注与工作区 AI">
+      <!-- 导出与打包结果属于顶栏操作，放在分栏之外，切换分栏时仍可见。 -->
+      <div class="feedback">
+        <p id="status" class="status" role="status" aria-live="polite"></p>
+        <button id="skip-export" class="button" type="button" hidden>跳过这些批注并导出</button>
+      </div>
+      <div class="tabs" role="tablist" aria-label="侧栏分区">
+        <button id="tab-notes" class="tabs__tab" type="button" role="tab" data-panel="notes" aria-controls="panel-notes" aria-selected="true">批注</button>
+        <button id="tab-ai" class="tabs__tab" type="button" role="tab" data-panel="ai" aria-controls="panel-ai" aria-selected="false" tabindex="-1">工作区 AI</button>
+      </div>
+      <div id="panel-notes" class="sidebar__panel" role="tabpanel" aria-labelledby="tab-notes">
+      <section class="composer" aria-labelledby="composer-title">
+        <h2 id="composer-title" class="section-title">新批注</h2>
+        <p class="hint">在正文选中文字，再写下批注。</p>
+        <form id="form" class="composer__form">
+          <output id="quote" class="quote" data-state="empty">还没有选中文字</output>
+          <textarea id="body" class="composer__input" aria-label="批注内容" placeholder="写下审阅意见" rows="3" required></textarea>
+          <div class="composer__footer">
+            <small class="hint"><kbd>Ctrl</kbd> + <kbd>Enter</kbd> 保存</small>
+            <button id="save" class="button button--primary" disabled>保存批注</button>
+          </div>
+        </form>
+      </section>
+      <section class="notes" aria-labelledby="notes-title">
+        <div class="notes__header">
+          <h2 id="notes-title" class="section-title">批注 <small id="count" class="count"></small></h2>
+          <small id="notes-summary" class="hint"></small>
+        </div>
+        <p id="notes-empty" class="notes__empty" hidden>还没有批注。</p>
+        <ol id="notes" class="note-list"></ol>
+      </section>
+      </div>
+      <div id="panel-ai" class="sidebar__panel" role="tabpanel" aria-labelledby="tab-ai" hidden>
+        <section class="assistant" aria-labelledby="assistant-title">
+          <div class="notes__header">
+            <h2 id="assistant-title" class="section-title">工作区整理</h2>
+            <small class="note__badge">先本地检索</small>
+          </div>
+          <p class="hint">先查看本地摘录，确认后再把问题和摘录交给所选 AI 服务。</p>
+          <form id="ai-form" class="composer__form">
+            <textarea id="ai-question" class="composer__input" aria-label="检索问题" placeholder="例如：整理施工进度核验的依据" rows="3" required></textarea>
+            <div class="composer__footer">
+              <button id="ai-search" class="button" type="submit" disabled>本地检索</button>
+              <button id="ai-send" class="button button--primary" type="button" disabled>用摘录生成</button>
+            </div>
+          </form>
+          <p id="ai-status" class="hint" role="status" aria-live="polite"></p>
+          <ol id="ai-sources" class="thread" aria-label="本地摘录"></ol>
+          <section id="ai-result" class="message" aria-label="整理稿" hidden>
+            <h3 class="section-title">整理稿</h3>
+            <p id="ai-answer" class="message__body"></p>
+            <ol id="ai-citations" class="thread" aria-label="整理稿来源"></ol>
+          </section>
+        </section>
+      </div>
+    </aside>
+  </main>
+  <script>/* reader.js */</script>
+</body>
+</html>

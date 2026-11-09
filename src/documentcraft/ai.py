@@ -3,6 +3,7 @@
 from dataclasses import dataclass, field
 import json
 import os
+from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
@@ -82,7 +83,13 @@ class NoRedirect(HTTPRedirectHandler):
         return None
 
 
-def _api_analysis(settings: AISettings, report: str) -> str:
+def settings_path() -> Path:
+    """返回桌面工作台与阅读器共用的设置文件。"""
+    base = Path(os.environ.get("LOCALAPPDATA") or Path.home())
+    return base / "DocumentCraft" / "ai-settings.json"
+
+
+def _api_analysis(settings: AISettings, instructions: str, report: str) -> str:
     key = settings.key or os.environ.get("OPENAI_API_KEY", "")
     if not key or not settings.model:
         raise ConversionError("请在 AI 设置中填写 API Key 和分析模型。")
@@ -96,7 +103,7 @@ def _api_analysis(settings: AISettings, report: str) -> str:
         "model": settings.model,
         "response_format": {"type": "json_object"},
         "messages": [
-            {"role": "system", "content": INSTRUCTIONS + "\nJSON Schema:\n" + json.dumps(PLAN_SCHEMA)},
+            {"role": "system", "content": instructions},
             {"role": "user", "content": report},
         ],
     }
@@ -116,24 +123,30 @@ def _api_analysis(settings: AISettings, report: str) -> str:
         raise ConversionError("AI API 返回了无法识别的响应。") from error
 
 
-def analyze(settings: AISettings, paragraphs: list[dict]) -> dict:
-    """通过选定连接分析完整报告并解析 JSON。"""
-    report = json.dumps(paragraphs, ensure_ascii=False)
+def request_json(settings: AISettings, instructions: str, payload: object) -> dict:
+    """通过选定连接提交数据并解析模型返回的 JSON 对象。"""
+    report = json.dumps(payload, ensure_ascii=False)
     try:
         if settings.provider == "chatgpt":
-            instructions = INSTRUCTIONS + "\nJSON Schema:\n" + json.dumps(PLAN_SCHEMA)
             response = analyze_report(
                 settings.model, instructions, report, reasoning_effort=settings.reasoning_effort,
             )
         elif settings.provider == "api":
-            response = _api_analysis(settings, report)
+            response = _api_analysis(settings, instructions, report)
         else:
             raise ConversionError("请先选择 AI 连接方式。")
         result = json.loads(response)
     except (json.JSONDecodeError, TypeError) as error:
-        raise ConversionError("分析服务没有返回有效的 JSON 计划。") from error
+        raise ConversionError("分析服务没有返回有效的 JSON。") from error
     if not isinstance(result, dict):
-        raise ConversionError("分析计划必须为 JSON 对象。")
+        raise ConversionError("分析结果必须为 JSON 对象。")
+    return result
+
+
+def analyze(settings: AISettings, paragraphs: list[dict]) -> dict:
+    """通过选定连接分析完整报告并解析图位计划。"""
+    instructions = INSTRUCTIONS + "\nJSON Schema:\n" + json.dumps(PLAN_SCHEMA)
+    result = request_json(settings, instructions, paragraphs)
     if not all(isinstance(result.get(key), list) for key in ("diagrams", "covered", "issues")):
         raise ConversionError("分析计划缺少图示、实图覆盖或问题列表。")
     return result

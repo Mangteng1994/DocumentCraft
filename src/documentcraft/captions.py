@@ -9,11 +9,20 @@ TABLE_INTRO = re.compile(r"^(?:下表|见下表|详见|参见)|如下$")
 SENTENCE_PUNCTUATION = re.compile(r"[。！？；!?;]|[.：:]$")
 
 
-def _caption_kind(block: dict | None) -> str:
+def _caption_inlines(block: dict, annotation_prefix: str | None) -> list[dict]:
+    inlines = block["c"]
+    if annotation_prefix and len(inlines) == 1 and inlines[0]["t"] == "Span":
+        attributes, content = inlines[0]["c"]
+        if attributes[0].startswith(annotation_prefix):
+            return content
+    return inlines
+
+
+def _caption_kind(block: dict | None, annotation_prefix: str | None = None) -> str:
     if block is None or block["t"] not in {"Para", "Plain"}:
         return ""
     pieces = []
-    for inline in block["c"]:
+    for inline in _caption_inlines(block, annotation_prefix):
         kind = inline["t"]
         if kind == "Str":
             pieces.append(inline["c"])
@@ -25,12 +34,12 @@ def _caption_kind(block: dict | None) -> str:
     return match[1] if match else ""
 
 
-def _is_short_table_title(block: dict) -> bool:
+def _is_short_table_title(block: dict, annotation_prefix: str | None) -> bool:
     """识别紧邻表格的无编号纯文本短标题。"""
-    if block["t"] not in {"Para", "Plain"} or _caption_kind(block):
+    if block["t"] not in {"Para", "Plain"} or _caption_kind(block, annotation_prefix):
         return False
 
-    inlines = block["c"]
+    inlines = _caption_inlines(block, annotation_prefix)
     if any(inline["t"] not in {"Str", "Space"} for inline in inlines):
         return False
     title = "".join(inline.get("c", " ") for inline in inlines).strip()
@@ -92,7 +101,7 @@ def _image_figure(block: dict) -> dict | None:
     return {"t": "Figure", "c": [["", [], []], [None, caption], [{"t": "Plain", "c": [first]}]]}
 
 
-def normalize_captions(ast: bytes) -> bytes:
+def normalize_captions(ast: bytes, *, annotation_prefix: str | None = None) -> bytes:
     """将相邻的显式题注交给 Pandoc 的 Figure 和 Table 节点。"""
     document = json.loads(ast)
     blocks = document["blocks"]
@@ -103,7 +112,7 @@ def normalize_captions(ast: bytes) -> bytes:
         following = blocks[index + 1] if index + 1 < len(blocks) else None
         figure = _image_figure(block)
         if figure is not None:
-            if not figure["c"][1][1] and _caption_kind(following) == "图":
+            if not figure["c"][1][1] and _caption_kind(following, annotation_prefix) == "图":
                 figure["c"][1][1] = [following]
                 index += 1
             block = figure
@@ -111,12 +120,14 @@ def normalize_captions(ast: bytes) -> bytes:
             # 显式编号优先于短标题推断。后置题注不能占用下一张表的前置题注。
             before = _table_title_source(normalized)
             next_block = blocks[index + 2] if index + 2 < len(blocks) else None
-            if before and _caption_kind(before[-1]) == "表":
+            if before and _caption_kind(before[-1], annotation_prefix) == "表":
                 block["c"][1][1] = [before.pop()]
-            elif _caption_kind(following) == "表" and (next_block is None or next_block["t"] != "Table"):
+            elif _caption_kind(following, annotation_prefix) == "表" and (
+                next_block is None or next_block["t"] != "Table"
+            ):
                 block["c"][1][1] = [following]
                 index += 1
-            elif before and _is_short_table_title(before[-1]):
+            elif before and _is_short_table_title(before[-1], annotation_prefix):
                 block["c"][1][1] = [before.pop()]
         normalized.append(block)
         index += 1
