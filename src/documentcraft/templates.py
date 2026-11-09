@@ -47,7 +47,7 @@ def apply_template_styles(template: Document, content: Document) -> bool:
         for style in template.styles if style.type == WD_STYLE_TYPE.PARAGRAPH
     }
     style_ids = set(paragraph_styles.values())
-    normal_style = paragraph_styles.get("Normal") or paragraph_styles.get("正文")
+    normal_style = paragraph_styles.get("正文") or paragraph_styles.get("Normal")
     body_style_ids = {"FirstParagraph", "BodyText"}
     for name in ("First Paragraph", "Body Text"):
         if name in paragraph_styles:

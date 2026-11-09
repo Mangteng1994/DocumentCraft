@@ -4,10 +4,12 @@ import argparse
 from base64 import b64encode
 import json
 import os
+import re
 import sqlite3
+import stat
 from contextlib import closing
 from hashlib import sha256
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from tempfile import TemporaryDirectory
 from urllib.parse import unquote, urlsplit
 from uuid import uuid4
@@ -21,6 +23,12 @@ from .review_notes import ReviewNote, paragraph_text
 
 ASSETS = Path(__file__).with_name("reader_ui")
 ALLOWED_TAGS = set("p h1 h2 h3 h4 h5 h6 strong em s u sup sub code pre blockquote ul ol li table thead tbody tr td th div span a hr br figure figcaption img".split())
+NUMERIC_ATTRIBUTES = {
+    "ol": {"start": (-2_147_483_648, 2_147_483_647)},
+    "li": {"value": (-2_147_483_648, 2_147_483_647)},
+    "td": {"colspan": (1, 1000), "rowspan": (0, 65_534)},
+    "th": {"colspan": (1, 1000), "rowspan": (0, 65_534)},
+}
 NOTES_FILE = Path(".documentcraft") / "reader-spike.sqlite3"
 MARKDOWN_SUFFIXES = {".md", ".markdown"}
 MARKDOWN_DIALOG = ("Markdown 文档 (*.md;*.markdown)",)
@@ -75,23 +83,50 @@ def _workspace_paths(root: Path) -> tuple[list[str], list[str]]:
 
 def _ordinary_path(path: Path) -> bool:
     try:
-        return path.resolve(strict=True) == path
-    except (OSError, RuntimeError):
+        info = path.lstat()
+    except OSError:
         return False
+    return not stat.S_ISLNK(info.st_mode) and not (
+        getattr(info, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT
+    )
+
+
+def _local_workspace_path(value: str, directory: Path, workspace: Path) -> Path | None:
+    """先拒绝设备和网络地址，再沿工作区内的普通目录定位文件。"""
+    windows = PureWindowsPath(value)
+    path = Path(value)
+    if not windows.parts or windows.anchor or path.anchor or re.search(r"[:\x00-\x1f]", value):
+        return None
+    if any(PureWindowsPath(part).is_reserved() for part in windows.parts):
+        return None
+    target = Path(os.path.abspath(directory / path))
+    if not target.is_relative_to(workspace):
+        return None
+    current = workspace
+    for part in target.relative_to(workspace).parts:
+        current = current / part
+        if not _ordinary_path(current):
+            return None
+    return target
 
 
 def _notes_database(root: Path) -> Path:
     database = root / NOTES_FILE
-    if not database.resolve().is_relative_to(root):
-        raise ValueError("批注数据库必须位于当前工作区内。")
+    for path in (database.parent, database):
+        try:
+            path.lstat()
+        except FileNotFoundError:
+            break
+        if not _ordinary_path(path):
+            raise ValueError("批注数据库必须是文件夹内的普通文件。")
     return database
 
 
-def _stored_notes(root: Path, source: Path) -> list[dict]:
+def _notes_in_folder(root: Path, source: Path) -> list[dict]:
     database = _notes_database(root)
     if not database.is_file():
         return []
-    with closing(sqlite3.connect(database)) as db:
+    with closing(sqlite3.connect(f"{database.as_uri()}?mode=ro", uri=True)) as db:
         db.row_factory = sqlite3.Row
         table = db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='notes'")
         if table.fetchone() is None:
@@ -101,10 +136,26 @@ def _stored_notes(root: Path, source: Path) -> list[dict]:
         return [dict(row) for row in rows]
 
 
+def _stored_notes(source: Path) -> list[dict]:
+    """读取文件旁的批注，并保留此前写在上级工作区里的记录。"""
+    notes = []
+    for distance, root in enumerate(source.parents):
+        try:
+            rows = _notes_in_folder(root, source)
+        except (sqlite3.Error, OSError, ValueError):
+            if distance == 0:
+                raise
+            continue
+        for row in rows:
+            row["id"] = f"{distance}:{row['id']}"
+            notes.append(row)
+    return notes
+
+
 def _saved_workspace(source: Path) -> Path:
     for root in source.parents:
         try:
-            if _stored_notes(root, source):
+            if _notes_in_folder(root, source):
                 return root
         except (sqlite3.Error, OSError, ValueError):
             continue
@@ -120,10 +171,14 @@ def _local_image(url: str, directory: Path, workspace: Path, remaining: int) -> 
         parsed = urlsplit(url)
         if parsed.scheme or parsed.netloc or parsed.query or parsed.fragment:
             return None
-        source = (directory / unquote(parsed.path)).resolve(strict=True)
         limit = min(MAX_IMAGE_BYTES, remaining)
+        if limit <= 0:
+            return None
+        source = _local_workspace_path(unquote(parsed.path), directory, workspace)
+        if source is None:
+            return None
         media = IMAGE_TYPES.get(source.suffix.lower())
-        if not media or not source.is_relative_to(workspace) or not source.is_file():
+        if not media or not source.is_file():
             return None
         with source.open("rb") as stream:
             raw = stream.read(limit + 1)
@@ -185,7 +240,15 @@ def render_markdown(data: bytes, directory: Path, workspace: Path | None = None)
             element.set("alt", alt)
             continue
         # 批注页面带本地存储桥。预览只接收允许的标签，移除导航和事件属性。
+        numeric = {name: element.get(name) for name in NUMERIC_ATTRIBUTES.get(element.tag, {})}
         element.attrib.clear()
+        for name, value in numeric.items():
+            if value is None or re.fullmatch(r"-?[0-9]{1,10}", value) is None:
+                continue
+            low, high = NUMERIC_ATTRIBUTES[element.tag][name]
+            number = int(value)
+            if low <= number <= high:
+                element.set(name, str(number))
     for paragraph, index in supported:
         paragraph.set("data-review-block", str(index))
     return html.tostring(root, encoding="unicode")
@@ -222,7 +285,7 @@ class Reader:
             "files": files,
             "revision": sha256(data).hexdigest() if source is not None else "",
             "html": render_markdown(data, source.parent, root) if source is not None else "",
-            "notes": _stored_notes(root, source) if source is not None else [],
+            "notes": _stored_notes(source) if source is not None else [],
         }
 
     def _open(self, root: Path, source: Path | None) -> dict:
@@ -239,9 +302,10 @@ class Reader:
 
     def open_document(self, path: str) -> dict:
         """打开工作区列表中的文件，并拒绝越出工作区的路径。"""
-        source = _markdown_file(self._root / path)
-        if not source.is_relative_to(self._root):
+        target = _local_workspace_path(path, self._root, self._root)
+        if target is None:
             raise ValueError("文件必须位于当前工作区内。")
+        source = _markdown_file(target)
         return self._open(self._root, source)
 
     def choose_file(self) -> dict | None:
@@ -295,14 +359,14 @@ class Reader:
             raise ValueError("源文件已更新，请重新读取后再选择文字。")
         if not body.strip() or not anchor["quote"].strip():
             raise ValueError("请输入批注并选中正文。")
-        database = _notes_database(self._root)
+        database = _notes_database(source.parent)
         database.parent.mkdir(exist_ok=True)
         with closing(sqlite3.connect(database)) as db:
             db.execute(SCHEMA)
             db.execute(
                 INSERT_NOTE,
                 (
-                    relative, current, anchor["block"], anchor["offset"],
+                    source.name, current, anchor["block"], anchor["offset"],
                     anchor["quote"], anchor["prefix"], anchor["suffix"], body.strip(),
                 ),
             )
@@ -313,7 +377,7 @@ class Reader:
         source = self._current_source()
         notes = []
         if plan is not None:
-            stored = {row["id"]: row for row in _stored_notes(self._root, source)}
+            stored = {row["id"]: row for row in _stored_notes(source)}
             resolved = {target["id"]: target for target in plan["targets"]}
             if set(plan["note_ids"]) != stored.keys() or not resolved.keys() <= stored.keys():
                 raise ValueError("批注已更新，请重新读取后导出。")
@@ -351,7 +415,7 @@ class Reader:
         if sha256(data).hexdigest() != revision:
             raise ValueError("源文件已更新，请重新读取后再打包。")
         filename = source.name
-        notes = _stored_notes(self._root, source)
+        notes = _stored_notes(source)
         if output.exists() or output.is_symlink():
             raise FileExistsError("已有同名分享包，请选择其他文件名。")
 

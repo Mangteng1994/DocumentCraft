@@ -104,13 +104,15 @@ def _image_figure(block: dict) -> dict | None:
 def normalize_captions(ast: bytes, *, annotation_prefix: str | None = None) -> bytes:
     """将相邻的显式题注交给 Pandoc 的 Figure 和 Table 节点。"""
     document = json.loads(ast)
+    # Pandoc 2.x 的隐式图片仍是 Image 段落，旧引擎无法读取 Figure 节点。
+    supports_figure = document["pandoc-api-version"][:2] >= [1, 23]
     blocks = document["blocks"]
     normalized = []
     index = 0
     while index < len(blocks):
         block = blocks[index]
         following = blocks[index + 1] if index + 1 < len(blocks) else None
-        figure = _image_figure(block)
+        figure = _image_figure(block) if supports_figure else None
         if figure is not None:
             if not figure["c"][1][1] and _caption_kind(following, annotation_prefix) == "图":
                 figure["c"][1][1] = [following]

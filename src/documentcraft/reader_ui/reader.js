@@ -270,6 +270,7 @@ function readSelection() {
  * @returns {{ block: Element, offset: number } | undefined}
  */
 function resolve(note) {
+  if (typeof note.quote !== "string" || !note.quote.trim()) return undefined;
   if (note.revision === state.revision) {
     const block = blocks[note.block];
     const end = note.offset + note.quote.length;
@@ -670,12 +671,13 @@ function revealHeading(entry) {
     return;
   }
   // 堆叠布局下 sticky 顶栏会遮住标题，按顶栏下沿换算整页滚动距离。
-  const headingStyle = getComputedStyle(entry.heading);
-  const margin = parseFloat(headingStyle.scrollMarginTop);
-  const headingTop = entry.heading.getBoundingClientRect().top;
-  const barBottom = appBar.getBoundingClientRect().bottom;
-  const distance = headingTop - barBottom - margin;
-  window.scrollBy({ top: distance, behavior });
+  revealInPage(entry.heading);
+}
+
+function revealInPage(target) {
+  const margin = parseFloat(getComputedStyle(target).scrollMarginTop) || 0;
+  const distance = target.getBoundingClientRect().top - appBar.getBoundingClientRect().bottom - margin;
+  window.scrollBy({ top: distance, behavior: scrollBehavior() });
 }
 
 /* ===== 侧栏分区 ===== */
@@ -786,6 +788,8 @@ function focusSource(source) {
   const matches = probe ? blocks.filter((block) => block.textContent.includes(probe)) : [];
   if (matches.length === 1) {
     matches[0].scrollIntoView({ block: "center", behavior: scrollBehavior() });
+  } else if (isStacked()) {
+    revealInPage(readingPane);
   }
   setStatus("来源 · " + source.path + " · 第 " + source.line + " 行");
 }
@@ -943,7 +947,7 @@ async function run(action) {
 /**
  * 构造导出计划：可导出批注的 Markdown 段落序号与码点偏移，以及全部批注 ID。
  * Python 端用 note_ids 核对批注是否在阅读后被修改，未出现在 targets 中的批注计为待定位。
- * @returns {{ targets: object[], note_ids: number[] }}
+ * @returns {{ targets: object[], note_ids: string[] }}
  */
 function buildExportPlan() {
   const targets = [];
@@ -1054,6 +1058,16 @@ for (const tab of sidebarTabs) {
 
 openFile.addEventListener("click", () => switchDocument(() => window.pywebview.api.choose_file()));
 openFolder.addEventListener("click", () => switchDocument(() => window.pywebview.api.choose_folder()));
+document.querySelector("#jump-files").addEventListener("click", () => {
+  workspaceFiles.open = true;
+  revealInPage(outlinePanel);
+});
+for (const name of ["notes", "ai"]) {
+  document.querySelector("#jump-" + name).addEventListener("click", () => {
+    showPanel(name);
+    revealInPage(document.querySelector(".sidebar"));
+  });
+}
 fileFilter.addEventListener("input", renderWorkspace);
 aiQuestion.addEventListener("input", syncAssistant);
 aiForm.addEventListener("submit", (event) => {

@@ -32,13 +32,16 @@ class ReportBlock:
     heading_level: int | None = None
 
 
-FIGURE_CAPTION = re.compile(r"^(?:图\s*[0-9０-９]|Figure\s+\d)", re.IGNORECASE)
+FIGURE_CAPTION = re.compile(r"^(?:图\s*|Figure\s+)\d+(?:[.．－—–-]\d+)*", re.IGNORECASE)
+CAPTION_PROSE = re.compile(r"^(?:所示|可见|显示|说明|展示|给出|表示|中[的可])|[。！？；]\s*$")
+TABLE_CAPTION = re.compile(r"^(?:表\s*\d|Table\s+\d)", re.IGNORECASE)
 FIGURE_REFERENCE = re.compile(
     r"如(?:下)?图|见(?:上|下)?图|下图|图\s*[0-9０-９]|"
     r"[“「][^”」\n]+[”」]\s*图|"
     r"(?:见|参照|结合|详见|对应|参见)[^。！？；\n]{0,30}(?:路线图|流程图|示意图|机制图|框架图|关系图)|"
     r"(?:路线图|流程图|示意图|机制图|框架图|关系图)(?:如下|所示)"
 )
+FIGURE_TARGET = re.compile(r"图\s*[0-9０-９]+(?:[.．－—–-][0-9０-９]+)*|[“「][^”」\n]+[”」]\s*图")
 FIGURE_STYLES = {"Caption", "Image Caption", "图名"}
 
 
@@ -48,18 +51,27 @@ def _figure_cues(blocks: list[ReportBlock]) -> dict[int, str]:
     for index, block in enumerate(blocks, 1):
         if block.picture or block.heading_level:
             continue
-        if block.kind in FIGURE_STYLES or FIGURE_CAPTION.match(block.text.strip()):
+        text = block.text.strip()
+        if block.kind == "表名" or (block.kind == "Caption" and TABLE_CAPTION.match(text)):
+            continue
+        label = FIGURE_CAPTION.match(text)
+        if block.kind in FIGURE_STYLES or (label and not CAPTION_PROSE.search(text[label.end():].lstrip())):
             cues[index] = "caption"
-        elif FIGURE_REFERENCE.search(block.text):
+        elif FIGURE_REFERENCE.search(text) or label:
             cues[index] = "reference"
     return cues
 
 
 def _contains_image(node: object) -> bool:
     if isinstance(node, dict):
-        if node.get("t") == "Image":
+        kind = node.get("t")
+        data = node.get("c")
+        if kind == "Image":
             return True
-        return _contains_image(node.get("c"))
+        if kind in {"RawBlock", "RawInline"} and data[0] == "html":
+            markup = re.sub(r"<!--.*?-->", "", data[1], flags=re.S)
+            return bool(re.search(r"<img\b", markup, re.I))
+        return _contains_image(data)
     if isinstance(node, list):
         return any(_contains_image(child) for child in node)
     return False
@@ -90,7 +102,7 @@ def _markdown_blocks(source: Path, original: str) -> list[ReportBlock]:
         if kind == "Header":
             section += 1
         text = "".join(lines[start - 1:end]).strip()
-        picture = _contains_image(block) or bool(re.search(r"<(?:img|picture)\b", text, re.I))
+        picture = _contains_image(block)
         natural = kind == "Div" and len(data[1]) == 1 and data[1][0]["t"] == "Para"
         anchor = end if natural and not picture else None
         heading_level = data[0] if kind == "Header" else None
@@ -102,6 +114,25 @@ def _markdown_blocks(source: Path, original: str) -> list[ReportBlock]:
     return blocks
 
 
+def _word_heading_level(paragraph: Paragraph) -> int | None:
+    """识别内置标题和用 Word 大纲级别定义的自定义标题。"""
+    direct = paragraph._p.xpath("./w:pPr/w:outlineLvl/@w:val")
+    if direct:
+        return int(direct[0]) + 1 if re.fullmatch(r"[0-8]", direct[0]) else None
+    style = paragraph.style
+    seen = set()
+    while style is not None and style.style_id not in seen:
+        levels = style.element.xpath("./w:pPr/w:outlineLvl/@w:val")
+        if levels:
+            return int(levels[0]) + 1 if re.fullmatch(r"[0-8]", levels[0]) else None
+        heading = re.fullmatch(r"(?:Heading\s+|标题\s*)([1-9])", style.name, re.IGNORECASE)
+        if heading:
+            return int(heading[1])
+        seen.add(style.style_id)
+        style = style.base_style
+    return None
+
+
 def _word_blocks(document) -> list[ReportBlock]:
     body = document.element.body
     blocks = []
@@ -109,16 +140,15 @@ def _word_blocks(document) -> list[ReportBlock]:
     for element in body.iter(qn("w:p")):
         paragraph = Paragraph(element, document._body)
         style = paragraph.style.name
-        heading = re.fullmatch(r"(?:Heading\s+|标题\s*)([1-9])", style, re.IGNORECASE)
-        level = int(heading[1]) if heading else None
+        level = _word_heading_level(paragraph)
         if level:
             section += 1
-        picture = bool(element.xpath(".//w:drawing | .//w:pict | .//w:object"))
+        picture = bool(element.xpath(".//w:drawing | .//w:pict"))
         text = "".join(element.xpath(".//w:t/text()"))
         if not text.strip() and not picture:
             continue
-        kind = "heading" if heading else style
-        insertable = element.getparent() is body and not heading and not picture
+        kind = "heading" if level else style
+        insertable = element.getparent() is body and not level and not picture
         insertable = insertable and style not in FIGURE_STYLES | {"表名", "Title", "题目"}
         anchor = paragraph if insertable else None
         blocks.append(ReportBlock(text, section, kind, picture, anchor, level))
@@ -167,21 +197,63 @@ def _block_id(value: object, blocks: list[ReportBlock]) -> bool:
     return type(value) is int and 1 <= value <= len(blocks)
 
 
-def _plan_payload(blocks: list[ReportBlock], cues: dict[int, str]) -> list[dict]:
-    """输出可跨节取证的正文和可核对的图位线索。"""
-    return [
-        {"id": index, "text": block.text, "section": block.section,
-         "heading_level": block.heading_level, "kind": block.kind,
-         "existing_image": block.picture, "insertable": block.anchor is not None,
-         "figure_cue": cues.get(index)}
-        for index, block in enumerate(blocks, 1)
-    ]
+def _report_outline(blocks: list[ReportBlock]) -> list[dict]:
+    """用实际标题层级建立节树，每节范围只包含自己的正文。"""
+    outline = []
+    parents = []
+    for index, block in enumerate(blocks, 1):
+        level = block.heading_level
+        if level is not None:
+            while parents and parents[-1]["level"] >= level:
+                parents.pop()
+            entry = {
+                "id": block.section, "level": level, "parent": parents[-1]["id"] if parents else None,
+                "title": block.text, "start": index, "end": index, "has_content": False,
+            }
+            outline.append(entry)
+            parents.append(entry)
+            continue
+        if not outline:
+            outline.append({
+                "id": block.section, "level": None, "parent": None,
+                "title": "无标题正文", "start": index, "end": index, "has_content": False,
+            })
+        outline[-1]["end"] = index
+        if block.text.strip() or block.picture:
+            outline[-1]["has_content"] = True
+    return outline
+
+
+def _is_insertable(block: ReportBlock, cue: str | None) -> bool:
+    return block.anchor is not None and cue != "caption"
+
+
+def _allows_multiple_targets(block: ReportBlock, cue: str | None) -> bool:
+    if cue != "reference":
+        return False
+    targets = {re.sub(r"\s+", "", match.group()) for match in FIGURE_TARGET.finditer(block.text)}
+    return len(targets) > 1
+
+
+def _plan_payload(blocks: list[ReportBlock], cues: dict[int, str], outline: list[dict]) -> dict:
+    """输出标题树、实图清单、可跨节取证的正文和引用线索。"""
+    return {
+        "top_level": min((entry["level"] for entry in outline if entry["level"] is not None), default=None),
+        "outline": outline,
+        "existing_images": [index for index, block in enumerate(blocks, 1) if block.picture],
+        "blocks": [
+            {"id": index, "text": block.text, "section": block.section, "kind": block.kind,
+             "insertable": _is_insertable(block, cues.get(index)), "figure_cue": cues.get(index),
+             "multiple_targets": _allows_multiple_targets(block, cues.get(index))}
+            for index, block in enumerate(blocks, 1)
+        ],
+    }
 
 
 def _validate(diagram: dict, blocks: list[ReportBlock], cues: dict[int, str]) -> str:
     """核对插入锚点、原文证据和技术图约束。"""
     anchor = diagram["anchor"]
-    if not _block_id(anchor, blocks) or blocks[anchor - 1].anchor is None:
+    if not _block_id(anchor, blocks) or not _is_insertable(blocks[anchor - 1], cues.get(anchor)):
         return "插入位置不是可用的正文段落"
     next_index = anchor + 1 if cues.get(anchor + 1) == "caption" else anchor
     if any(block.picture for block in blocks[anchor:next_index + 1]):
@@ -259,6 +331,75 @@ def _insert_word(document, anchor: Paragraph, image: Path, title: str | None) ->
     figure._p.addnext(caption._p)
 
 
+OMISSION_LABELS = {
+    "merged": "并入其他图",
+    "insufficient_evidence": "原文依据不足",
+    "not_useful": "无需单独出图",
+    "uncertain": "待确认",
+}
+
+
+def _review_sections(
+    plan: dict, blocks: list[ReportBlock], outline: list[dict], generated: dict[int, str],
+) -> tuple[list[tuple], list[tuple]]:
+    """列出模型说明的遗漏，并显式标出未收到说明的节。"""
+    sections = {entry["id"]: entry for entry in outline}
+    diagram_sections = {blocks[anchor - 1].section for anchor in generated}
+    image_sections = {block.section for block in blocks if block.picture}
+    reviewed = set()
+    seen_topics = set()
+    rows = []
+    pending = []
+    for item in plan.get("omissions", []):
+        if not isinstance(item, dict):
+            continue
+        section = item.get("section")
+        status = item.get("status")
+        topic = item.get("topic")
+        reason = item.get("reason")
+        anchor = item.get("diagram_anchor")
+        if type(section) is not int or section not in sections:
+            continue
+        if not isinstance(status, str) or status not in OMISSION_LABELS:
+            continue
+        if not isinstance(topic, str) or not topic.strip() or not isinstance(reason, str) or not reason.strip():
+            continue
+        key = (section, topic.strip())
+        if key in seen_topics:
+            continue
+        seen_topics.add(key)
+        reviewed.add(section)
+        section_label = f"节 {section} · {sections[section]['title']}"
+        disposition = OMISSION_LABELS[status]
+        if status == "merged":
+            if type(anchor) is int and anchor in generated:
+                disposition += f"（段落 {anchor}：{generated[anchor]}）"
+            else:
+                disposition = "待确认"
+                reason = f"计划并入的图未成功生成。{reason}"
+                pending.append((f"节 {section} · {topic}", reason))
+        elif status == "uncertain":
+            pending.append((f"节 {section} · {topic}", reason))
+        rows.append((section_label, topic, disposition, reason))
+
+    for entry in outline:
+        section = entry["id"]
+        if not entry["has_content"] or section in diagram_sections | image_sections | reviewed:
+            continue
+        section_label = f"节 {section} · {entry['title']}"
+        reason = "本节未单独出图，分析计划也未说明原因。"
+        rows.append((section_label, "—", "未说明", reason))
+        pending.append((section_label, reason))
+    return rows, pending
+
+
+def _append_review_rows(rows: list[str], entries: list[tuple]) -> None:
+    """将正文和模型输出作为表格文字写入 Markdown。"""
+    for entry in entries:
+        fields = [_markdown_text(" ".join(str(value).splitlines())) for value in entry]
+        rows.append("| " + " | ".join(fields) + " |")
+
+
 def illustrate(source: Path, settings: AISettings, *, colored: bool) -> dict:
     """生成图片、配图版报告和人工复核清单，保留输入文件。"""
     source = source.resolve(strict=True)
@@ -286,7 +427,8 @@ def illustrate(source: Path, settings: AISettings, *, colored: bool) -> dict:
         if not blocks:
             raise ConversionError("报告没有可分析的正文。")
         cues = _figure_cues(blocks)
-        plan = analyze(settings, _plan_payload(blocks, cues))
+        outline = _report_outline(blocks)
+        plan = analyze(settings, _plan_payload(blocks, cues, outline))
         staged_assets = work / job
         staged_assets.mkdir()
         issues = []
@@ -295,18 +437,26 @@ def illustrate(source: Path, settings: AISettings, *, colored: bool) -> dict:
                 issues.append((str(item.get("id", "—")), item["reason"]))
         edits = []
         review_rows = []
-        used_anchors = set()
+        generated = {}
         resolved = set()
+        failed_references = {}
         overview = False
         fingerprints = set()
         for index, block in enumerate(blocks, 1):
             if block.picture:
                 review_rows.append(("已有实图", index, "原稿包含图像", "—", "保留"))
+        covered_pairs = set()
         for item in plan["covered"]:
             if not isinstance(item, dict):
                 continue
             ref, image = item.get("reference"), item.get("image")
             if _block_id(ref, blocks) and ref in cues and _block_id(image, blocks) and blocks[image - 1].picture:
+                if (ref, image) in covered_pairs:
+                    continue
+                if ref in resolved and not _allows_multiple_targets(blocks[ref - 1], cues[ref]):
+                    issues.append((ref, "同一图题或单一引用被关联到多张实图，请核对对应关系。"))
+                    continue
+                covered_pairs.add((ref, image))
                 resolved.add(ref)
                 review_rows.append(("已有实图", image, f"原文引用 {ref}", "—", "保留"))
         candidates = enumerate(plan["diagrams"], 1)
@@ -314,12 +464,21 @@ def illustrate(source: Path, settings: AISettings, *, colored: bool) -> dict:
             isinstance(entry[1], dict) and entry[1].get("placement") == "missing"
         ))
         for index, diagram in ordered:
+            stage = "候选校验未通过"
+            image = staged_assets / f"figure-{index}.png"
             try:
                 problem = _validate(diagram, blocks, cues)
                 if problem:
                     raise ConversionError(problem)
+                duplicates = sorted({
+                    ref for ref in diagram["references"] if ref in resolved
+                    and not _allows_multiple_targets(blocks[ref - 1], cues[ref])
+                })
+                if duplicates:
+                    locations = ", ".join(map(str, duplicates))
+                    raise ConversionError(f"单一图题或引用已处理（段落 {locations}），请核对是否重复补图")
                 anchor = diagram["anchor"]
-                if anchor in used_anchors:
+                if anchor in generated:
                     raise ConversionError("同一正文位置已插图")
                 if overview and diagram["overview"]:
                     raise ConversionError("全文已生成一张总览图")
@@ -329,17 +488,26 @@ def illustrate(source: Path, settings: AISettings, *, colored: bool) -> dict:
                 )
                 if fingerprint in fingerprints:
                     raise ConversionError("节点关系与已有新图重复")
-                image = staged_assets / f"figure-{index}.png"
+                stage = "候选绘制失败"
                 render_diagram(diagram, image, colored)
             except (ConversionError, OSError, TypeError, ValueError, KeyError, AttributeError) as error:
-                issues.append((f"候选图 {index}", str(error)))
-                title = diagram.get("title", "—") if isinstance(diagram, dict) else "—"
-                review_rows.append(("待确认", "—", title, "—", str(error)))
+                image.unlink(missing_ok=True)
+                reason = f"{stage}：{error}"
+                issues.append((f"候选图 {index}", reason))
+                candidate = diagram if isinstance(diagram, dict) else {}
+                anchor = candidate.get("anchor")
+                location = anchor if _block_id(anchor, blocks) else "—"
+                review_rows.append(("待确认", location, candidate.get("title", "—"), "—", reason))
+                refs = candidate.get("references")
+                if isinstance(refs, list):
+                    for ref in refs:
+                        if _block_id(ref, blocks) and ref in cues:
+                            failed_references.setdefault(ref, []).append(f"候选图 {index} · {reason}")
                 continue
             title = diagram["title"].strip()
             reuse_caption = cues.get(anchor + 1) == "caption" and anchor + 1 in diagram["references"]
             edits.append((blocks[anchor - 1].anchor, image, None if reuse_caption else title))
-            used_anchors.add(anchor)
+            generated[anchor] = title
             resolved.update(diagram["references"])
             spans = ", ".join(f"{region['start']}–{region['end']}" for region in diagram["evidence_ranges"])
             category = "有引用但缺图" if diagram["placement"] == "missing" else "原文适合新增"
@@ -355,11 +523,16 @@ def illustrate(source: Path, settings: AISettings, *, colored: bool) -> dict:
         for ref in cues:
             if ref in resolved:
                 continue
-            reason = issue_by_id.get(str(ref))
-            if reason is None:
-                reason = "引用去向或对应关系未确定"
+            if ref in failed_references:
+                reason = "；".join(failed_references[ref])
+            elif str(ref) in issue_by_id:
+                reason = issue_by_id[str(ref)]
+            else:
+                reason = "规划未给出图位或实图对应关系"
                 issues.append((str(ref), reason))
             review_rows.append(("待确认", ref, blocks[ref - 1].text[:120], "—", reason))
+        section_rows, section_issues = _review_sections(plan, blocks, outline, generated)
+        issues.extend(section_issues)
 
         staged_output = work / output.name
         if markdown:
@@ -379,17 +552,18 @@ def illustrate(source: Path, settings: AISettings, *, colored: bool) -> dict:
             document.save(staged_output)
             open_docx(staged_output)
         review = staged_assets / "审核清单.md"
-        rows = ["# 配图审核清单", "", "段落编号来自本次分析，取证范围可跨节。", "",
+        top_level = min((entry["level"] for entry in outline if entry["level"] is not None), default=None)
+        heading_note = f"本稿顶层为 {top_level} 级标题。" if top_level is not None else "本稿无显式标题。"
+        rows = ["# 配图审核清单", "", "段落编号来自本次分析，取证范围可跨节。" + heading_note, "",
+                f"原稿实图位置 {sum(block.picture for block in blocks)} 处；引用和图题 {len(cues)} 处，"
+                f"其中 {len(resolved)} 处已对应至少一张实图或生成图；共生成 {len(edits)} 张图。", "",
                 "| 分类 | 插入位置或引用 | 图题或线索 | 取证范围 | 处理结果 |",
                 "| --- | --- | --- | --- | --- |"]
-        for entry in review_rows:
-            fields = [_markdown_text(" ".join(str(value).splitlines())) for value in entry]
-            rows.append("| " + " | ".join(fields) + " |")
-        rows.extend(["", "| 位置 | 待确认问题 |", "| --- | --- |"])
-        for location, reason in issues or [("—", "无待确认问题")]:
-            clean_reason = _markdown_text(" ".join(reason.splitlines()))
-            clean_location = _markdown_text(" ".join(location.splitlines()))
-            rows.append(f"| {clean_location} | {clean_reason} |")
+        _append_review_rows(rows, review_rows or [("—", "—", "—", "—", "无图位记录")])
+        rows.extend(["", "## 未单独出图的主题", "", "| 节 | 主题 | 处理 | 理由 |", "| --- | --- | --- | --- |"])
+        _append_review_rows(rows, section_rows or [("—", "—", "—", "无单列记录")])
+        rows.extend(["", "## 待确认问题", "", "| 位置 | 待确认问题 |", "| --- | --- |"])
+        _append_review_rows(rows, issues or [("—", "无待确认问题")])
         review.write_text("\n".join(rows) + "\n", encoding="utf-8")
         # 输出先在同一磁盘完成写入，再发布；发生冲突时回收本次新资源目录。
         if output.exists() or assets.exists():

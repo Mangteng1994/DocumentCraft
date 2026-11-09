@@ -1,6 +1,7 @@
 """Windows 桌面应用的官方 Sign in with ChatGPT 客户端。"""
 
 import base64
+from contextlib import contextmanager
 from dataclasses import dataclass
 import hashlib
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -98,6 +99,27 @@ def _host_id() -> str:
 
 def _session_file() -> Path:
     return _folder() / "chatgpt-session.dpapi"
+
+
+@contextmanager
+def _session_lock():
+    """串行处理工作台和阅读器对同一份登录记录的写入。"""
+    import win32event
+
+    path = os.path.normcase(str(_session_file()))
+    identifier = hashlib.sha256(path.encode("utf-8")).hexdigest()
+    mutex = win32event.CreateMutex(None, False, f"Local\\DocumentCraft.ChatGPT.{identifier}")
+    try:
+        outcome = win32event.WaitForSingleObject(mutex, 90_000)
+        # WAIT_OBJECT_0 和 WAIT_ABANDONED 都意味着当前线程已持有互斥量。
+        if outcome not in (0, 0x80):
+            raise ConversionError("ChatGPT 会话正在更新，请稍后重试。")
+        try:
+            yield
+        finally:
+            win32event.ReleaseMutex(mutex)
+    finally:
+        mutex.Close()
 
 
 def _read_session() -> dict | None:
@@ -251,9 +273,10 @@ def sign_in(cancel: Event | None = None) -> str:
         "client_id": client_id, "id_token": id_token,
         "subject": identity["sub"], "email": identity.get("email", ""),
     })
-    if cancel is not None and cancel.is_set():
-        raise ConversionError("已取消等待 ChatGPT 登录。")
-    _save_session(session)
+    with _session_lock():
+        if cancel is not None and cancel.is_set():
+            raise ConversionError("已取消等待 ChatGPT 登录。")
+        _save_session(session)
     return session["email"] or "ChatGPT 账号"
 
 
@@ -262,7 +285,15 @@ def access_token() -> str:
     session = _read_session()
     if session is None:
         raise ConversionError("请先在 AI 设置中使用 ChatGPT 登录。")
-    if session["expires_at"] < time.time() + 60:
+    if session["expires_at"] >= time.time() + 60:
+        return session["access_token"]
+    with _session_lock():
+        # 等锁期间，另一个进程可能已刷新、退出或更换账号。
+        session = _read_session()
+        if session is None:
+            raise ConversionError("请先在 AI 设置中使用 ChatGPT 登录。")
+        if session["expires_at"] >= time.time() + 60:
+            return session["access_token"]
         tokens = _tokens({
             "grant_type": "refresh_token", "client_id": session["client_id"],
             "refresh_token": session["refresh_token"],
@@ -354,6 +385,11 @@ def analyze_report(model: str, instructions: str, report: str, *, reasoning_effo
 
 def sign_out() -> None:
     """撤销本应用的 ChatGPT 会话并清理本机凭据。"""
+    with _session_lock():
+        _sign_out_locked()
+
+
+def _sign_out_locked() -> None:
     session = _read_session()
     if session is None:
         return

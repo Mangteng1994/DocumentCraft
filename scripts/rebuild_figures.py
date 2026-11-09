@@ -312,7 +312,12 @@ def rebuild(source: Path, blueprint: Path, output: Path, previews: Path | None) 
             raise ValueError(f"插图锚点缺失或不唯一：{figure['title']}")
         anchor = matches[0]
         used_anchors.add(anchor._p)
-        for evidence in figure["evidence"]:
+        fragments = figure.get("evidence")
+        if not isinstance(fragments, list) or not fragments:
+            raise ValueError(f"至少提供一条原文取证片段：{figure['title']}")
+        for evidence in fragments:
+            if not isinstance(evidence, str) or not evidence.strip():
+                raise ValueError(f"原文取证片段须为非空文字：{figure['title']}")
             if "".join(evidence.split()) not in flattened_body:
                 raise ValueError(f"原文中找不到取证片段：{evidence}")
 
