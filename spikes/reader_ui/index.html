@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DocumentCraft · 批注试读</title>
+<style>/* reader.css */</style>
+<header>
+  <div><strong>DocumentCraft</strong><small id="path"></small></div>
+  <div class="actions">
+    <label><input type="checkbox" id="include-notes" checked> 包含批注</label>
+    <button id="export" type="button">导出 DOCX</button>
+    <button id="share" type="button" disabled>打包 Markdown 与批注</button>
+    <button id="reload" type="button">重新读取</button>
+  </div>
+</header>
+<main>
+  <article id="document" aria-label="Markdown 正文"></article>
+  <aside aria-label="批注">
+    <h2>批注 <small id="count"></small></h2>
+    <p class="hint">在正文选中文字，再写下批注。</p>
+    <form id="form">
+      <output id="quote">还没有选中文字</output>
+      <textarea id="body" aria-label="批注内容" placeholder="写下审阅意见" rows="3" required></textarea>
+      <button id="save" disabled>保存批注</button>
+    </form>
+    <p id="status" role="status"></p>
+    <button id="skip-export" type="button" hidden>跳过这些批注并导出</button>
+    <ol id="notes"></ol>
+  </aside>
+</main>
+<script>/* reader.js */</script>
+</html>
+

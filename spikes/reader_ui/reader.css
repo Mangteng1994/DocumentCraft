@@ -1,0 +1,54 @@
+:root {
+  --paper: #fdfbf4;
+  --margin: #f3efe4;
+  --ink: #292820;
+  --muted: #625b4d;
+  --rule: #d5ccbb;
+  --accent: #604228;
+  --accent-ink: #fff8ea;
+  --highlight: #ffe29d;
+  --active-highlight: #ffc960;
+  --sans: "Microsoft YaHei UI", sans-serif;
+  --serif: "Noto Serif SC", "SimSun", serif;
+  --small: .82rem;
+  --body: 1rem;
+  --subtitle: 1.25rem;
+  --title: 2rem;
+  --regular: 400;
+  --bold: 700;
+  --reading-line: 1.85;
+  --ui-line: 1.5;
+  --gap: .75rem;
+  --edge: 1.25rem;
+  --page-inset: clamp(1rem, 5vw, 3.75rem);
+  --page-width: 52rem;
+  --sidebar-width: 20rem;
+  --disabled-opacity: .55;
+  --sidebar-height: 100vh;
+  --border: 1px solid var(--rule);
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--paper); color: var(--ink); font: var(--regular) var(--body)/var(--ui-line) var(--sans); }
+header { display: flex; align-items: center; justify-content: space-between; gap: var(--gap); padding: var(--gap) var(--edge); border-bottom: var(--border); }
+small, .hint, #status { color: var(--muted); font-size: var(--small); }
+header strong { font-weight: var(--bold); }
+.actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--gap); }
+header small { display: block; overflow-wrap: anywhere; }
+main { display: flex; flex-wrap: wrap; align-items: stretch; }
+article { flex: 1 1 min(var(--page-width), calc(100% - var(--sidebar-width))); min-width: min(100%, var(--sidebar-width)); padding: var(--edge) var(--page-inset); font-family: var(--serif); line-height: var(--reading-line); }
+article h1 { font-size: var(--title); line-height: var(--ui-line); }
+aside { flex: 1 1 var(--sidebar-width); max-width: min(100%, var(--sidebar-width)); min-height: var(--sidebar-height); background: var(--margin); border-left: var(--border); padding: var(--edge); }
+aside h2 { margin: 0; font-size: var(--subtitle); }
+form, #notes { display: grid; gap: var(--gap); }
+output { overflow-wrap: anywhere; color: var(--muted); font-size: var(--small); }
+button, textarea { font: inherit; color: inherit; background: var(--paper); border: var(--border); padding: var(--gap); }
+button { cursor: pointer; }
+button:disabled { cursor: default; opacity: var(--disabled-opacity); }
+#save:not(:disabled) { color: var(--accent-ink); background: var(--accent); }
+#notes { padding: 0; list-style: none; }
+#notes li { border-top: var(--border); padding-top: var(--gap); overflow-wrap: anywhere; }
+#notes button { border: 0; background: transparent; padding: 0; text-align: left; color: var(--accent); text-decoration: underline; }
+#notes p { white-space: pre-wrap; margin: var(--gap) 0; }
+::highlight(reader-notes) { background-color: var(--highlight); }
+::highlight(reader-active) { background-color: var(--active-highlight); }
+

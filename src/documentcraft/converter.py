@@ -5,16 +5,19 @@ import os
 import shutil
 import subprocess
 import sys
+from hashlib import sha256
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Literal
 from urllib.parse import unquote, urlsplit
+from uuid import uuid4
 from zipfile import BadZipFile
 
 from docx import Document
 from docx.opc.exceptions import PackageNotFoundError
 from lxml.etree import XMLSyntaxError
 
+from .review_notes import ReviewNote, mark_paragraphs, write_notes
 from .templates import (
     ConversionError,
     apply_template_styles,
@@ -141,6 +144,8 @@ def convert(
     mode: TemplateMode = "auto",
     overwrite: bool = False,
     check_only: bool = False,
+    notes: tuple[ReviewNote, ...] = (),
+    source_revision: str | None = None,
 ) -> dict[str, str]:
     """预检查输入，转换成功后再发布输出文件。"""
     if mode not in ("auto", "style", "full"):
@@ -171,12 +176,22 @@ def convert(
         "template_mode": "full" if anchor is not None else "style",
         "output": str(output),
     }
+    source_args = [str(source)]
+    snapshot = None
+    if source_revision is not None:
+        snapshot = source.read_bytes()
+        if sha256(snapshot).hexdigest() != source_revision:
+            raise ConversionError("源文件已更新，请重新读取后导出。")
+        source_args = []
+    elif notes:
+        raise ConversionError("导出批注需要正文版本。")
     ast = run_pandoc(
         executable,
         source.parent,
         "--from", MARKDOWN_FORMAT,
         "--to", "json",
-        str(source),
+        *source_args,
+        data=snapshot,
     )
     check_images(ast, source.parent)
     if check_only:
@@ -184,6 +199,11 @@ def convert(
 
     generate_toc = anchor is None and has_toc_placeholder(master)
     options = document_options(ast, generate_toc)
+
+    marked = {}
+    if notes:
+        prefix = "DCNote" + uuid4().hex[:16]
+        ast, marked = mark_paragraphs(ast, notes, prefix)
 
     # 临时结果与目标位于同一文件系统，便于成功后一次性发布。
     with TemporaryDirectory(prefix=".documentcraft-", dir=output.parent) as directory:
@@ -202,13 +222,17 @@ def convert(
             try:
                 insert_content(master, generated, anchor)
                 request_field_updates(master)
+                if marked:
+                    write_notes(master, marked)
                 master.save(staged)
             except (KeyError, ValueError, XMLSyntaxError) as error:
                 raise ConversionError(f"无法将正文合并到完整模板\n{error}") from error
             open_docx(staged)
-        elif footnotes_repaired or styles_changed or generate_toc:
+        elif footnotes_repaired or styles_changed or generate_toc or marked:
             if generate_toc:
                 request_field_updates(generated)
+            if marked:
+                write_notes(generated, marked)
             generated.save(staged)
             open_docx(staged)
 
