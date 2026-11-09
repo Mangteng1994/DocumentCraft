@@ -1,11 +1,13 @@
 """Windows 桌面应用的官方 Sign in with ChatGPT 客户端。"""
 
 import base64
+from dataclasses import dataclass
 import hashlib
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import json
 import os
 from pathlib import Path
+import re
 import secrets
 from tempfile import NamedTemporaryFile
 from threading import Event
@@ -26,6 +28,41 @@ TOKEN_URL = f"{ISSUER}/api/accounts/oauth/token"
 SCOPE = "openid profile email offline_access resource.invoke chatgpt.tokens.use.direct"
 REQUIRED_SCOPES = {"resource.invoke", "chatgpt.tokens.use.direct"}
 CALLBACK = "/auth/callback"
+
+# 套餐模型目录保证提供模型名称和 slug。缺少档位元数据时，仅采用官方文档已明确的档位。
+# https://developers.openai.com/api/docs/models
+_REASONING_EFFORTS = ("none", "minimal", "low", "medium", "high", "xhigh", "max")
+_STANDARD_EFFORTS = ("low", "medium", "high", "xhigh")
+_EFFORTS_BY_MODEL = {
+    "gpt-6-astra": (*_STANDARD_EFFORTS, "max"),
+    "gpt-6.1-sol": (*_STANDARD_EFFORTS, "max"),
+    "gpt-6.1-terra": ("none", *_STANDARD_EFFORTS, "max"),
+    "gpt-6-sol": ("none", *_STANDARD_EFFORTS, "max"),
+    "gpt-6-luna": ("none", *_STANDARD_EFFORTS, "max"),
+    "gpt-5.6": ("none", *_STANDARD_EFFORTS, "max"),
+    "gpt-5.6-sol": ("none", *_STANDARD_EFFORTS, "max"),
+    "gpt-5.6-terra": ("none", *_STANDARD_EFFORTS, "max"),
+    "gpt-5.6-luna": ("none", *_STANDARD_EFFORTS, "max"),
+    "gpt-5.5": ("none", *_STANDARD_EFFORTS),
+    "gpt-5.5-pro": ("medium", "high", "xhigh"),
+    "gpt-5.4": ("none", *_STANDARD_EFFORTS),
+    "gpt-5.4-mini": ("none", *_STANDARD_EFFORTS),
+    "gpt-5.4-nano": ("none", *_STANDARD_EFFORTS),
+    "gpt-5.4-pro": ("medium", "high", "xhigh"),
+    "gpt-5.3-codex": _STANDARD_EFFORTS,
+    "gpt-5.2": ("none", *_STANDARD_EFFORTS),
+    "gpt-5.2-pro": ("medium", "high", "xhigh"),
+    "gpt-5.2-codex": _STANDARD_EFFORTS,
+}
+
+
+@dataclass(frozen=True)
+class ChatGPTModel:
+    """记录套餐模型的显示名称、请求标识和可选推理强度。"""
+
+    display_name: str
+    slug: str
+    efforts: tuple[str, ...]
 
 
 class _NoRedirect(HTTPRedirectHandler):
@@ -64,15 +101,20 @@ def _session_file() -> Path:
 
 
 def _read_session() -> dict | None:
+    try:
+        encrypted = _session_file().read_bytes()
+    except FileNotFoundError:
+        return None
+
     import win32crypt
     from pywintypes import error as WindowsError
 
     try:
-        encrypted = _session_file().read_bytes()
         _, raw = win32crypt.CryptUnprotectData(encrypted, None, None, None, 1)
-        return json.loads(raw)
-    except FileNotFoundError:
-        return None
+        session = json.loads(raw)
+        if not isinstance(session, dict):
+            raise ValueError("ChatGPT 登录记录格式无效。")
+        return session
     except (ValueError, WindowsError) as error:
         raise ConversionError("无法读取本机 ChatGPT 登录记录。请退出后重新登录。") from error
 
@@ -230,25 +272,55 @@ def access_token() -> str:
     return session["access_token"]
 
 
-def account_models() -> list[tuple[str, str]]:
+def saved_account() -> str | None:
+    """读取本机已有会话的账号名称，不发起网络请求。"""
+    session = _read_session()
+    if session is None:
+        return None
+    return session.get("email") or "ChatGPT 账号"
+
+
+def _model_efforts(item: dict) -> tuple[str, ...]:
+    """优先使用目录返回的档位，缺少元数据时识别已知模型和日期快照。"""
+    levels = item.get("supported_reasoning_levels")
+    if isinstance(levels, list):
+        advertised = [
+            level.get("effort")
+            for level in levels
+            if isinstance(level, dict)
+        ]
+        return tuple(effort for effort in _REASONING_EFFORTS if effort in advertised)
+
+    # 快照继承同名基础模型的能力。其他后缀可能代表不同能力的模型。
+    slug = re.sub(r"-20\d{2}-\d{2}-\d{2}$", "", item["slug"])
+    return _EFFORTS_BY_MODEL.get(slug, ())
+
+
+def account_models() -> list[ChatGPTModel]:
     """列出当前账号对应用可见的模型。"""
     try:
         with _request(f"{RESOURCE}/models", token=access_token()) as response:
             catalog = json.load(response)
-        return [(item["display_name"], item["slug"]) for item in catalog["models"]
-                if item.get("visibility") == "list"]
+        return [
+            ChatGPTModel(item["display_name"], item["slug"], _model_efforts(item))
+            for item in catalog["models"]
+            if item.get("visibility") == "list"
+        ]
     except HTTPError as error:
         raise ConversionError(f"无法读取 ChatGPT 模型列表（HTTP {error.code}）。") from error
     except (URLError, ValueError, KeyError, TypeError) as error:
         raise ConversionError("无法读取 ChatGPT 模型列表。") from error
 
 
-def analyze_report(model: str, instructions: str, report: str) -> str:
+def analyze_report(model: str, instructions: str, report: str, *, reasoning_effort: str = "") -> str:
     """使用 ChatGPT 套餐调用公开 Responses API，读取完整流。"""
     data = {
         "model": model, "instructions": instructions, "store": False, "stream": True,
         "input": [{"role": "user", "content": report}],
     }
+    # 使用模型默认档位时省略 reasoning，以兼容不接受该参数的模型。
+    if reasoning_effort:
+        data["reasoning"] = {"effort": reasoning_effort}
     fragments = []
     try:
         with _request(

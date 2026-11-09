@@ -14,9 +14,9 @@
 
 ## 科研配图
 
-在「AI 设置」选连接方式。「API Key」使用兼容 `/chat/completions` 且支持 JSON 输出的服务，可配置地址和模型。Key 可在窗口中输入，或从 `OPENAI_API_KEY` 读取。保存设置只保存连接方式、地址和模型。
+在「AI 设置」选连接方式。「兼容 API」使用兼容 `/chat/completions` 且支持 JSON 输出的服务，可配置地址和模型。Key 可在窗口中输入，或从 `OPENAI_API_KEY` 读取，窗口中输入的 Key 仅用于当前会话。
 
-点击「Sign in with ChatGPT」，在系统浏览器登录并授权 DocumentCraft 使用套餐额度。OpenAI 在首次授权时动态发放 Client ID，应用用 Windows DPAPI 加密保存会话。登录后从「ChatGPT 套餐模型」选择模型，已有会话可点击「刷新模型」。此连接通过公开 Responses API 分析正文，由本地程序绘制 PNG。[官方桌面登录流程](https://developers.openai.com/siwc/token-sharing-open-source/sign-in)
+选择「ChatGPT 套餐」，点击「Continue with ChatGPT」，在系统浏览器登录并授权 DocumentCraft 使用套餐额度。应用用 Windows DPAPI 加密保存会话。登录后，在「分析参数」分别选择模型和推理强度。可选强度随模型变化，选择「模型默认」时由服务端决定。点击「保存设置」可在下次启动时恢复选择。此连接通过公开 Responses API 分析正文，由本地程序绘制 PNG。[官方桌面登录流程](https://developers.openai.com/siwc/token-sharing-open-source/sign-in)
 
 在「科研配图」选择报告和黑白或分区配色风格，然后开始分析。程序在确认后向所选服务提交报告文本、标题层级、实图位置和引用线索。结果包括配图版报告、PNG 资源和 `审核清单.md`。旧版 DOC 需要本机 WPS，配图版输出 DOCX。
 
