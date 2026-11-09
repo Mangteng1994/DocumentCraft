@@ -1,0 +1,181 @@
+/**
+ * 应用外壳，布局参照 Obsidian：
+ * 左侧 Ribbon（打开文件夹、打开文件、Copilot、批注，底部为设置）、左侧栏（文件 / 大纲）、
+ * 中间编辑区（顶部视图标题）、右侧栏（Copilot / 批注）和状态栏。
+ * MD 转 Word 与科研流程图从「设置」进入，不在主界面放置按钮。
+ */
+
+import { useEffect, type ReactNode } from "react";
+import { Bot, FileText, FolderOpen, MessageSquare, Settings, X } from "lucide-react";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import { ask } from "@tauri-apps/plugin-dialog";
+import { MarkdownEditor } from "./editor/MarkdownEditor";
+import { EditorContextMenu } from "./editor/EditorContextMenu";
+import { InsertTablePicker } from "./editor/InsertTablePicker";
+import { Sidebar } from "./sidebar/Sidebar";
+import { CommentsPanel } from "./features/comments/CommentsPanel";
+import { CopilotView } from "./features/copilot/CopilotView";
+import { QuickAsk } from "./features/copilot/QuickAsk";
+import { useCopilot } from "./features/copilot/copilotStore";
+import { toggleCopilot } from "./features/copilot/actions";
+import { SettingsModal } from "./features/settings/SettingsModal";
+import { chooseFile, chooseWorkspace } from "./documentActions";
+import { fileName } from "./paths";
+import { useSettings } from "./settings/settingsStore";
+import { useTheme } from "./settings/theme";
+import { useHotkeys } from "./settings/useHotkeys";
+import { useAppStore, type Overlay } from "./store";
+import { iconSize, iconStroke } from "./styles/tokens";
+
+function RibbonButton({ label, icon, onClick, pressed }: { label: string; icon: ReactNode; onClick: () => void; pressed?: boolean }) {
+  return (
+    <button type="button" className={`dc-ribbon-button${pressed ? " is-pressed" : ""}`} onClick={onClick} aria-pressed={pressed} aria-label={label} title={label}>
+      {icon}
+    </button>
+  );
+}
+
+function WelcomeView() {
+  return (
+    <div className="dc-welcome">
+      <h1 className="dc-welcome-title">DocumentCraft</h1>
+      <p className="dc-welcome-text">面向科研文档的 Markdown 阅读编辑器。打开工作区浏览文档，在编辑器中批注、与 Copilot 整理，并在设置中按 Word 模板导出。</p>
+      <div className="dc-welcome-actions">
+        <button type="button" className="dc-link-button is-large" onClick={() => void chooseWorkspace()}>
+          打开文件夹
+        </button>
+        <button type="button" className="dc-link-button is-large" onClick={() => void chooseFile()}>
+          打开 Markdown 文件
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ActiveOverlay({ overlay }: { overlay: Overlay }) {
+  if (!overlay) {
+    return null;
+  }
+  if (overlay.kind === "settings") {
+    return <SettingsModal tab={overlay.tab} />;
+  }
+  if (overlay.kind === "insertTable") {
+    return <InsertTablePicker />;
+  }
+  return <QuickAsk commandName={overlay.commandName} />;
+}
+
+export function App() {
+  const filePath = useAppStore((state) => state.filePath);
+  const dirty = useAppStore((state) => state.dirty);
+  const workspace = useAppStore((state) => state.workspace);
+  const rightPanel = useAppStore((state) => state.rightPanel);
+  const setRightPanel = useAppStore((state) => state.setRightPanel);
+  const overlay = useAppStore((state) => state.overlay);
+  const openSettings = useAppStore((state) => state.openSettings);
+  const status = useAppStore((state) => state.status);
+  const notes = useAppStore((state) => state.notes);
+  const loadSettings = useSettings((state) => state.load);
+  const copilotFolder = useSettings((state) => state.settings.copilot.folder);
+  const reloadCommands = useCopilot((state) => state.reloadCommands);
+
+  useTheme();
+  useHotkeys();
+
+  useEffect(() => {
+    void loadSettings();
+  }, [loadSettings]);
+
+  // 右键菜单与 / 菜单都需要命令列表，工作区或 Copilot 文件夹变化时重新读取。
+  useEffect(() => {
+    void reloadCommands();
+  }, [workspace, copilotFolder, reloadCommands]);
+
+  // 关闭窗口前提示未保存的修改。
+  useEffect(() => {
+    const appWindow = getCurrentWindow();
+    const unlisten = appWindow.onCloseRequested(async (event) => {
+      const { dirty: unsaved, filePath: path } = useAppStore.getState();
+      if (!unsaved || !path) {
+        return;
+      }
+      const discard = await ask(`「${fileName(path)}」有未保存的修改，仍要关闭吗？`, {
+        title: "DocumentCraft",
+        kind: "warning",
+        okLabel: "不保存并关闭",
+        cancelLabel: "返回编辑",
+      });
+      if (!discard) {
+        event.preventDefault();
+      }
+    });
+    return () => {
+      void unlisten.then((stop) => stop());
+    };
+  }, []);
+
+  useEffect(() => {
+    const name = filePath ? fileName(filePath) : "";
+    const title = name ? `${dirty ? "● " : ""}${name} · DocumentCraft` : "DocumentCraft";
+    void getCurrentWindow().setTitle(title);
+  }, [filePath, dirty]);
+
+  const hasDocument = filePath !== null;
+  const ribbonIcon = { size: iconSize.md, strokeWidth: iconStroke.regular };
+
+  return (
+    <div className="dc-app">
+      <nav className="dc-ribbon" aria-label="功能区">
+        <RibbonButton label="打开文件夹" icon={<FolderOpen {...ribbonIcon} />} onClick={() => void chooseWorkspace()} />
+        <RibbonButton label="打开 Markdown 文件" icon={<FileText {...ribbonIcon} />} onClick={() => void chooseFile()} />
+        <RibbonButton label="Copilot" icon={<Bot {...ribbonIcon} />} onClick={toggleCopilot} pressed={rightPanel === "copilot"} />
+        <RibbonButton
+          label={`批注${notes.length > 0 ? `（${notes.length}）` : ""}`}
+          icon={<MessageSquare {...ribbonIcon} />}
+          onClick={() => setRightPanel(rightPanel === "comments" ? null : "comments")}
+          pressed={rightPanel === "comments"}
+        />
+        <span className="dc-ribbon-spacer" />
+        <RibbonButton label="设置" icon={<Settings {...ribbonIcon} />} onClick={() => openSettings()} />
+      </nav>
+
+      <div className={`dc-workbench${rightPanel ? " has-panel" : ""}`}>
+        <Sidebar />
+        <main className="dc-main">
+          {hasDocument && (
+            <header className="dc-view-header">
+              <span className="dc-view-title">{fileName(filePath)}</span>
+              {dirty && <span className="dc-view-dirty" title="未保存" aria-label="未保存" />}
+            </header>
+          )}
+          {/* 编辑器常驻，避免切换文档时重建 ProseMirror 视图。 */}
+          <div className={hasDocument ? "dc-editor-area" : "dc-editor-area is-hidden"}>
+            <MarkdownEditor />
+          </div>
+          {!hasDocument && <WelcomeView />}
+        </main>
+        {rightPanel && (
+          <aside className="dc-panel" aria-label={rightPanel === "comments" ? "批注" : "Copilot"}>
+            <div className="dc-panel-header">
+              <h2 className="dc-panel-title">{rightPanel === "comments" ? "批注" : "Copilot"}</h2>
+              <button type="button" className="dc-icon-button" aria-label="关闭侧栏" onClick={() => setRightPanel(null)}>
+                <X size={iconSize.sm} />
+              </button>
+            </div>
+            {rightPanel === "comments" ? <CommentsPanel /> : <CopilotView />}
+          </aside>
+        )}
+      </div>
+
+      <footer className="dc-statusbar">
+        <span className="dc-statusbar-path" title={filePath ?? ""}>
+          {filePath ?? "未打开文档"}
+        </span>
+        <span className="dc-statusbar-message">{dirty ? "未保存" : status}</span>
+      </footer>
+
+      <EditorContextMenu />
+      <ActiveOverlay overlay={overlay} />
+    </div>
+  );
+}
