@@ -78,7 +78,7 @@ cd editor
 npm run bundle
 ```
 
-sidecar 输出到 `out/sidecar/`，运行库（WebView2Loader.dll、libunwind.dll）由 `npm run bundle` 暂存到 `out/runtime/`，安装包位于 `editor/src-tauri/target/release/bundle/nsis/`。目标机器需要 WebView2 Runtime，Windows 11 已自带。
+sidecar 输出到 `out/sidecar/`。`npm run bundle` 调用 `scripts/bundle-editor.ps1`，固定用 rustup 的 MSVC 工具链（`stable-x86_64-pc-windows-msvc`，需 Visual Studio Build Tools 的 C++ 工具）编译：WebView2 加载器静态链接，不需要额外 DLL；gnullvm 构建会被部分杀毒软件（如火绒）误报隔离。安装包位于 `editor/src-tauri/target/release/bundle/nsis/`。目标机器需要 WebView2 Runtime，Windows 11 已自带。
 
 ### sidecar 接口
 
