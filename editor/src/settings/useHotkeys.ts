@@ -4,7 +4,7 @@
  */
 
 import { useEffect } from "react";
-import { saveDocument } from "../documentActions";
+import { closeTab, saveDocument, switchTab } from "../documentActions";
 import { setHeading, setParagraph, type HeadingLevel } from "../editor/editorCommands";
 import { getEditor } from "../editor/editorHandle";
 import { addSelectionToChat, openQuickAsk, toggleCopilot } from "../features/copilot/actions";
@@ -42,6 +42,14 @@ function runAction(action: ActionId): void {
     insertTable: () => store.setOverlay({ kind: "insertTable" }),
     save: () => void saveDocument(),
     openSettings: () => store.openSettings(),
+    searchWorkspace: () => store.openSearch(),
+    closeTab: () => {
+      if (store.filePath) {
+        void closeTab(store.filePath);
+      }
+    },
+    nextTab: () => void switchTab(1),
+    previousTab: () => void switchTab(-1),
     toggleCopilot,
     quickAsk: openQuickAsk,
     addSelectionToChat,

@@ -35,6 +35,8 @@
   --dc-color-success: #08b94e;
   --dc-color-annotation: rgba(255, 208, 0, 0.4);   /* --text-highlight-bg */
   --dc-color-annotation-active: rgba(255, 166, 0, 0.6);
+  /* 搜索结果中的命中文字，跟随强调色的浅底，在两种主题中自动适配。 */
+  --dc-color-search-hit: var(--dc-color-accent-soft);
   --dc-color-code-surface: #fafafa;
   --dc-color-overlay: rgba(0, 0, 0, 0.4);
   --dc-color-alert-note: #086ddd;
@@ -95,6 +97,10 @@
   --dc-size-sidebar: 260px;
   --dc-size-sidebar-min: 180px;
   --dc-size-panel: 360px;
+  --dc-size-resizer: 6px;                   /* 侧栏拖动条的命中宽度 */
+  --dc-size-doc-tab-min: 96px;
+  --dc-size-doc-tab-max: 220px;
+  --dc-size-workspace-menu: 320px;
   --dc-size-control: 30px;
   --dc-size-icon-button: 28px;
   --dc-size-ribbon-button: 32px;

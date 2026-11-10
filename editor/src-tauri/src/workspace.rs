@@ -234,6 +234,194 @@ pub fn remove_markdown(path: String) -> Result<(), String> {
     fs::remove_file(&target).map_err(|error| format!("无法删除 {path}：{error}"))
 }
 
+/// 搜索最多读取的 Markdown 文件数、单个文件大小，以及返回的匹配总数和单文件匹配数。
+const MAX_SEARCH_FILES: usize = 5000;
+const MAX_SEARCH_FILE_BYTES: u64 = 4 * 1024 * 1024;
+const MAX_SEARCH_MATCHES: usize = 500;
+const MAX_MATCHES_PER_FILE: usize = 50;
+/// 匹配前后保留的上下文字符数。
+const SNIPPET_BEFORE: usize = 30;
+const SNIPPET_AFTER: usize = 60;
+
+#[derive(Serialize)]
+pub struct SearchMatch {
+    /// 从 1 起的行号。
+    line: usize,
+    /// 该匹配是文件中第几处（从 0 起），供前端在排版后的正文中定位。
+    occurrence: usize,
+    before: String,
+    hit: String,
+    after: String,
+}
+
+#[derive(Serialize)]
+pub struct SearchFile {
+    path: String,
+    name: String,
+    name_match: bool,
+    matches: Vec<SearchMatch>,
+    /// 文件中的匹配超过单文件上限，未全部列出。
+    more: bool,
+}
+
+#[derive(Serialize)]
+pub struct SearchResult {
+    files: Vec<SearchFile>,
+    /// 达到文件数或匹配总数上限，结果不完整。
+    truncated: bool,
+}
+
+/// 逐字符小写，保证小写后的字符序号与原文一一对应，便于截取上下文。
+fn lower_chars(text: &str) -> Vec<char> {
+    text.chars()
+        .map(|ch| ch.to_lowercase().next().unwrap_or(ch))
+        .collect()
+}
+
+/// 返回 needle 在 haystack 中所有不重叠出现的起始字符序号。
+fn find_all(haystack: &[char], needle: &[char]) -> Vec<usize> {
+    let mut starts = Vec::new();
+    if needle.is_empty() || haystack.len() < needle.len() {
+        return starts;
+    }
+    let mut index = 0;
+    while index + needle.len() <= haystack.len() {
+        if haystack[index..index + needle.len()] == *needle {
+            starts.push(index);
+            index += needle.len();
+        } else {
+            index += 1;
+        }
+    }
+    starts
+}
+
+fn snippet(chars: &[char], start: usize, length: usize) -> (String, String, String) {
+    let from = start.saturating_sub(SNIPPET_BEFORE);
+    let end = start + length;
+    let to = (end + SNIPPET_AFTER).min(chars.len());
+    let mut before: String = chars[from..start].iter().collect();
+    let hit: String = chars[start..end].iter().collect();
+    let mut after: String = chars[end..to].iter().collect();
+    if from > 0 {
+        before.insert(0, '…');
+    }
+    if to < chars.len() {
+        after.push('…');
+    }
+    (before.trim_start().to_string(), hit, after.trim_end().to_string())
+}
+
+/// 收集工作区内的 Markdown 文件，规则与目录树一致：跳过隐藏目录、链接和目录联接。
+fn collect_markdown(path: &Path, depth: usize, files: &mut Vec<PathBuf>) {
+    if depth >= MAX_DEPTH || files.len() >= MAX_SEARCH_FILES {
+        return;
+    }
+    let entries = match fs::read_dir(path) {
+        Ok(value) => value,
+        Err(_) => return,
+    };
+    let mut children: Vec<PathBuf> = Vec::new();
+    for entry in entries.flatten().take(MAX_ENTRIES_PER_DIR) {
+        let entry_name = entry.file_name().to_string_lossy().into_owned();
+        if entry_name.starts_with('.') {
+            continue;
+        }
+        children.push(entry.path());
+    }
+    children.sort_by_key(|item| item.to_string_lossy().to_lowercase());
+    for child in children {
+        if files.len() >= MAX_SEARCH_FILES {
+            return;
+        }
+        let metadata = match fs::symlink_metadata(&child) {
+            Ok(value) => value,
+            Err(_) => continue,
+        };
+        if !is_ordinary(&metadata) {
+            continue;
+        }
+        if metadata.is_dir() {
+            collect_markdown(&child, depth + 1, files);
+        } else if is_markdown(&child) && metadata.len() <= MAX_SEARCH_FILE_BYTES {
+            files.push(child);
+        }
+    }
+}
+
+fn search_file(path: &Path, needle: &[char], budget: usize) -> Option<SearchFile> {
+    let name = path.file_name()?.to_string_lossy().into_owned();
+    let name_match = !find_all(&lower_chars(&name), needle).is_empty();
+    // 非 UTF-8 文件只按文件名匹配。
+    let text = fs::read(path).ok().and_then(|bytes| String::from_utf8(bytes).ok()).unwrap_or_default();
+    let limit = budget.min(MAX_MATCHES_PER_FILE);
+    let mut matches = Vec::new();
+    let mut occurrence = 0;
+    let mut more = false;
+    for (index, line) in text.lines().enumerate() {
+        let original: Vec<char> = line.chars().collect();
+        let lowered = lower_chars(line);
+        for start in find_all(&lowered, needle) {
+            if matches.len() >= limit {
+                more = true;
+                break;
+            }
+            let (before, hit, after) = snippet(&original, start, needle.len());
+            matches.push(SearchMatch { line: index + 1, occurrence, before, hit, after });
+            occurrence += 1;
+        }
+        if more {
+            break;
+        }
+    }
+    if !name_match && matches.is_empty() {
+        return None;
+    }
+    Some(SearchFile {
+        path: path.to_string_lossy().into_owned(),
+        name,
+        name_match,
+        matches,
+        more,
+    })
+}
+
+fn search_root(root: &Path, query: &str) -> SearchResult {
+    let needle = lower_chars(query.trim());
+    let mut paths = Vec::new();
+    collect_markdown(root, 0, &mut paths);
+    let mut truncated = paths.len() >= MAX_SEARCH_FILES;
+    let mut files = Vec::new();
+    let mut total = 0;
+    for path in paths {
+        if total >= MAX_SEARCH_MATCHES {
+            truncated = true;
+            break;
+        }
+        if let Some(file) = search_file(&path, &needle, MAX_SEARCH_MATCHES - total) {
+            total += file.matches.len();
+            files.push(file);
+        }
+    }
+    SearchResult { files, truncated }
+}
+
+/// 在工作区所有 Markdown 中按文件名和正文搜索，不区分大小写。结果按文件路径排序。
+#[tauri::command]
+pub async fn search_workspace(root: String, query: String) -> Result<SearchResult, String> {
+    if query.trim().is_empty() {
+        return Ok(SearchResult { files: Vec::new(), truncated: false });
+    }
+    let task = tauri::async_runtime::spawn_blocking(move || {
+        let path = PathBuf::from(&root);
+        if !path.is_dir() {
+            return Err(format!("工作区不是文件夹：{root}"));
+        }
+        Ok(search_root(&path, &query))
+    });
+    task.await.map_err(|error| error.to_string())?
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -288,6 +476,31 @@ mod tests {
         assert!(create_folder(dir.clone(), "新文件夹".to_string()).is_ok());
         assert!(create_folder(dir.clone(), "新文件夹".to_string()).is_err());
         assert!(create_folder(dir, "a/b".to_string()).is_err());
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn search_matches_names_and_lines_case_insensitively() {
+        let root = scratch("search");
+        fs::write(root.join("流量报告.md"), "# Flow 试验\n第二行没有\n入口 flow 与 FLOW 两处\n").unwrap();
+        fs::write(root.join("子目录").join("笔记.md"), "无关内容\n").unwrap();
+        fs::write(root.join("说明.txt"), "flow").unwrap();
+        fs::write(root.join(".hidden").join("隐藏.md"), "flow").unwrap();
+        let result = search_root(&root, "flow");
+        assert_eq!(result.files.len(), 1);
+        let file = &result.files[0];
+        assert_eq!(file.name, "流量报告.md");
+        assert!(!file.name_match);
+        let lines: Vec<usize> = file.matches.iter().map(|item| item.line).collect();
+        assert_eq!(lines, vec![1, 3, 3]);
+        let occurrences: Vec<usize> = file.matches.iter().map(|item| item.occurrence).collect();
+        assert_eq!(occurrences, vec![0, 1, 2]);
+        assert_eq!(file.matches[2].hit, "FLOW");
+        assert_eq!(file.matches[1].before, "入口 ");
+        let by_name = search_root(&root, "笔记");
+        assert_eq!(by_name.files.len(), 1);
+        assert!(by_name.files[0].name_match);
+        assert!(by_name.files[0].matches.is_empty());
         let _ = fs::remove_dir_all(&root);
     }
 

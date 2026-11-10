@@ -2,7 +2,7 @@
 
 需求基线来自[共享设计对话](https://chatgpt.com/share/6af1985c-7af8-83ea-83f3-4cb3d453c294)。DocumentCraft 面向 Windows 与 WPS 的本地科研文档工作流。两条主线共用 Python 文档处理核心。CLI 面向用户和 Codex Skill，后续桌面入口通过本地 API 调用同一核心。AI 负责配图判断与规划，确定性引擎负责文件转换、资源校验和回插。
 
-本轮切片为 Markdown 阅读编辑器：以 [VMark](https://github.com/xiaolai/vmark)（ISC）的编辑核心为基础重组精简的 Tauri 2 应用，只保留文件树和文档大纲两个侧栏视图。MD 转 Word、科研配图、Copilot（工作区整理）和批注都作为编辑器功能接入，Python 核心以 `docflow` sidecar 形式提供 JSON 接口。MoSCoW 优先级相对于本轮。已实现表示已落代码，验收状态单独记录。
+本轮切片为 Markdown 阅读编辑器：以 [VMark](https://github.com/xiaolai/vmark)（ISC）的编辑核心为基础重组精简的 Tauri 2 应用，侧栏保留文件树、文档大纲和工作区搜索三个视图，编辑区为多文档页签。MD 转 Word、科研配图、Copilot（工作区整理）和批注都作为编辑器功能接入，Python 核心以 `docflow` sidecar 形式提供 JSON 接口。MoSCoW 优先级相对于本轮。已实现表示已落代码，验收状态单独记录。
 
 ## Must
 
@@ -44,11 +44,16 @@
 | DC-043 | 编辑快捷键 | 默认 Ctrl+1～6 为 1～6 级标题、Ctrl+0 为正文段落、Ctrl+T 插入表格；全部快捷键可录制、清除、恢复默认，冲突时提示并移除原绑定 | 已验收（模拟 IPC，真实按键） · `editor/src/settings/` |
 | DC-044 | 编辑区右键菜单与插入表格 | 右键菜单含剪切、复制、粘贴、全选、插入表格、表格增删行列、添加批注和 Copilot 子菜单；插入表格可在网格中选择行列数，首行为表头 | 已验收（模拟 IPC） · `editor/src/editor/EditorContextMenu.tsx`、`InsertTablePicker.tsx` |
 | DC-045 | Copilot 命令与 Quick Ask | 命令以 Markdown 保存在 copilot-custom-prompts/，格式与 Obsidian Copilot 相同，可生成默认命令；右键或快捷键打开 Quick Ask，结果可复制、插入、替换选区或追问 | 已验收（模拟 IPC） · `editor/src/features/copilot/` |
-| DC-046 | 显示所有文件 | 「设置 → 文件」可开启显示所有文件：目录树列出工作区内全部文件和空文件夹（隐藏目录仍不显示），非 Markdown 文件置灰、点击只提示不能打开；默认关闭，保持只显示 Markdown | 已验收（模拟 IPC）· `editor/src/features/settings/FilesSettings.tsx`、`src-tauri/src/workspace.rs` 的 `list_tree(show_all)`；Rust 测试覆盖 |
+| DC-046 | 显示所有文件 | 「设置 → 文件」可开启显示所有文件：目录树列出工作区内全部文件和空文件夹（隐藏目录仍不显示），非 Markdown 文件置灰、点击用系统默认应用打开（DC-052）；默认关闭，保持只显示 Markdown | 已验收（模拟 IPC）· `editor/src/features/settings/FilesSettings.tsx`、`src-tauri/src/workspace.rs` 的 `list_tree(show_all)`；Rust 测试覆盖 |
 | DC-047 | 目录树新建 Markdown 与文件夹 | 文件栏头部有「新建 Markdown」「新建文件夹」按钮，在最近点击的文件夹（默认工作区根目录）下输入名称创建；Markdown 缺扩展名时补 .md 并打开；同名、含非法字符的名称被拒绝且不覆盖；默认视图中完全空的文件夹也保留 | 已验收（模拟 IPC）· `editor/src/sidebar/FileTree.tsx`、`documentActions.ts`、`workspace.rs` 的 `create_markdown`/`create_folder`；Rust 测试覆盖 |
 | DC-048 | 内置 Word 模板 | 「我的文档模板」随安装包内置，MD 转 Word 默认使用；「设置 → MD 转 Word」可更换为自定义 .docx，也可恢复内置模板 | 已实现 · `editor/resources/builtin-template.docx`、`src-tauri/src/lib.rs` 的 `builtin_template`、`WordExportSettings.tsx`；用内置模板经 docflow 导出成功（样式模式），界面与安装包未测试 |
 | DC-049 | 最近打开的文件夹 | 欢迎页列出最近打开的工作区（最多 10 个，最新在前），点击直接打开，× 只从列表移除；记录保存在编辑器设置中 | 已验收（模拟 IPC）· `editor/src/components/RecentWorkspaces.tsx`、`documentActions.ts`、`settings/schema.ts` 的 `history` |
 | DC-050 | 标题级别显示 | 编辑区每个标题左侧显示 H1～H6，大纲每行显示级别；h4～h6 字号区分，h6 用次要文字色 | 已验收（模拟 IPC）· `editor/src/styles/app.css`、`tokens.css`、`sidebar/OutlineView.tsx` |
+| DC-051 | 工作区文档搜索 | 侧栏「搜索」视图（Ctrl+Shift+F）在当前工作区所有 Markdown 中按文件名和正文搜索（不区分大小写），结果按文件分组，显示行号与带高亮的上下文；点击结果打开文档并选中对应文字；隐藏目录不搜索，结果数量有上限并提示 | 已验收（模拟 IPC + Rust 测试）· `editor/src/sidebar/SearchView.tsx`、`src-tauri/src/workspace.rs` 的 `search_workspace`、`editorHandle.ts` 的 `revealOccurrence` |
+| DC-053 | 图片插入与显示 | `file:///` 与本地绝对路径的图片正常显示；找不到的图片显示「找不到图片」占位和原路径；粘贴截图或图片、右键「插入图片」时把图片保存到文档旁的 `assets/` 并以相对路径插入；粘贴内容中引用本地临时文件的图片在粘贴时复制到 `assets/`；不覆盖已有文件 | 已验收（模拟 IPC + Rust 测试）· `editor/src/editor/imageSupport.ts`、`assets.ts`、`src-tauri/src/images.rs`；不能找回已被清理的临时图片 |
+| DC-054 | 多文档页签 | 编辑区顶部为页签栏，打开文档时新增或切换页签；每个页签保留各自内容、撤销历史与未保存状态；页签可关闭（未保存时询问），Ctrl+W 关闭、Ctrl+Tab / Ctrl+Shift+Tab 切换；关闭窗口时检查所有页签 | 已验收（模拟 IPC）· `editor/src/components/DocumentTabs.tsx`、`documentActions.ts` 的页签现场、`editorHandle.ts` 的 `snapshotDocument`/`restoreDocument` |
+| DC-055 | 侧栏宽度拖动 | 左侧栏与右侧栏边缘可拖动调整宽度，有最小和最大宽度，双击恢复默认；宽度保存在设置中，重启后保留 | 已验收（模拟 IPC）· `editor/src/components/PaneResizer.tsx`、`settings/schema.ts` 的 `layout`、`tokens.ts` 的 `paneWidth` |
+| DC-056 | 状态栏工作区切换 | 状态栏左侧只显示当前工作区文件夹名，悬停显示完整路径；点击弹出最近打开的工作区列表，选择后切换，也可打开其他文件夹 | 已验收（模拟 IPC）· `editor/src/components/WorkspaceSwitcher.tsx` |
 
 ## Should
 
@@ -57,6 +62,7 @@
 | DC-005 | 预检查和机器可读结果 | 报告模板锚点异常、缺失图片和转换错误，提供 JSON 输出 | 已实现 · `--check`、`--json`；图像支持本地文件 |
 | DC-006 | 完整模板目录更新 | 请求编辑器在打开时更新域 | 已实现 · 写入 `w:updateFields`，实际更新取决于 Word/WPS |
 | DC-013 | 脚注资源保真 | 两种模板模式保留脚注、外部链接和本地图像，脚注引用指向输出包内正确的资源 | 样例已验收 · `core/src/documentcraft/templates.py` |
+| DC-052 | 非 Markdown 文件用默认应用打开 | 开启「显示所有文件」后，点击置灰的非 Markdown 文件用系统默认应用打开；可执行文件和脚本不直接运行，只提示 | 已验收（模拟 IPC + Rust 测试）· `sidebar/FileTree.tsx` → `documentActions.ts` 的 `openWithSystem` → `lib.rs` 的 `open_path`（`BLOCKED_OPEN_EXTENSIONS`） |
 
 ## Could
 
@@ -220,3 +226,17 @@ foreach ($step in 'save','reopen','style','full','skip','plain') {
 - 浏览器加载真实 `App` 并模拟 IPC：设置中预置含非法项的最近列表，欢迎页只列出有效路径；从列表打开工作区后目录树正常，并被移到列表最前写回设置。编辑区 H1～H3 标题左侧出现对应级别标记，位于标题左侧留白内；大纲行显示 H1、H2、H3。tsc 通过。
 - 未执行：原生窗口内查看（截图因窗口隐藏未取得）；h4～h6 的显示未用样例确认。
 
+## 2026-11-10 工作区搜索与默认应用打开
+
+- 搜索（DC-051）：Rust 测试覆盖文件名匹配、多行与同行多处匹配、大小写不敏感、序号与上下文截取，隐藏目录和非 Markdown 文件不参与。浏览器模拟 IPC：Ctrl+Shift+F 切到「搜索」视图并聚焦输入框；搜「重复句」列出 1 个文档 2 处匹配，点击第 2 条后打开文档并选中第二段中的「重复句」；按文件名搜「笔记」时文件名高亮；无结果时提示；切换视图后关键词保留。tsc 通过。
+- 默认应用打开（DC-052）：模拟 IPC 中点击 `数据.csv` 调用 `open_path` 并在状态栏提示已打开；点击 `安装.exe` 被拒绝并显示原因。Rust 测试覆盖拦截的扩展名（大小写不敏感）与放行的普通文件。
+- 未执行：原生窗口中的实际打开效果（系统默认应用是否启动）、大型工作区的搜索耗时；截图因窗口隐藏未取得，界面样式未目视检查。
+
+## 2026-11-10 页签、侧栏调宽、工作区切换与图片
+
+- 图片（DC-053）：用户文档中的 123 处图片均为 `![img](file:///C:\Users\…\Temp\ksohtml31332\wpsN.png)`，即从 WPS 粘贴时留下的临时文件引用，该目录已被清理，图片无法找回；编辑器此前也不识别 `file:///` 地址。现在 `file:///` 与盘符路径按本地文件显示，缺失图片显示「找不到图片：文件名」占位；粘贴截图保存到 `assets/`；粘贴 WPS 内容时把仍存在的临时图片复制到 `assets/` 并改写为相对路径，已不存在的保留原地址并提示；右键「插入图片…」。Rust 测试覆盖写入 `assets/`、重名加序号不覆盖、拒绝非图片扩展名和空数据。模拟 IPC：连续粘贴两张截图与一段含临时图片的 HTML，图片按顺序插入、不替换相邻图片，可复制的改写为 `assets/wps1.png`。
+- 修复：以图片或表格结尾的文档打开后被误标为「未保存」。原因是 TipTap TrailingNode 在打开后的第一个事务（载入批注）中补空段落；`loadMarkdown` 现在先应用插件的补全再记录未修改基线。
+- 页签（DC-054）：模拟 IPC 中打开两篇文档，在第二篇输入后切回第一篇，内容与未保存标记正确；Ctrl+Tab / Ctrl+Shift+Tab 切换；切回后撤销只影响本页签；Ctrl+W 关闭未保存页签时询问并保存；关闭最后一个页签回到欢迎页。
+- 侧栏调宽（DC-055）：模拟拖动左侧栏 +100px 后宽度 360 并写入设置，拖过上限夹到 560，双击恢复 260；右侧栏向左拖 80px 后 440。
+- 工作区切换（DC-056）：状态栏左侧显示文件夹名，title 为完整路径；菜单列出最近工作区和「打开其他文件夹…」，选择后切换并关闭菜单。
+- tsc 通过，Rust 9 项测试通过。未执行：原生窗口内目视检查（窗口隐藏，截图未取得）、真实 WPS 剪贴板粘贴；从资源管理器拖放图片文件未实现。

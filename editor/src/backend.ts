@@ -26,6 +26,42 @@ export function createFolder(directory: string, name: string): Promise<string> {
   return invoke<string>("create_folder", { directory, name });
 }
 
+export interface SearchMatch {
+  line: number;
+  occurrence: number;
+  before: string;
+  hit: string;
+  after: string;
+}
+
+export interface SearchFile {
+  path: string;
+  name: string;
+  name_match: boolean;
+  matches: SearchMatch[];
+  more: boolean;
+}
+
+export interface SearchResult {
+  files: SearchFile[];
+  truncated: boolean;
+}
+
+/** 在工作区所有 Markdown 中按文件名和正文搜索，不区分大小写。 */
+export function searchWorkspace(root: string, query: string): Promise<SearchResult> {
+  return invoke<SearchResult>("search_workspace", { root, query });
+}
+
+/** 把粘贴的图片数据保存到文档旁的 assets/，返回相对于文档目录的路径。 */
+export function storeImage(document: string, data: Uint8Array, extension: string): Promise<string> {
+  return invoke<string>("store_image", { document, data: Array.from(data), extension });
+}
+
+/** 把本地图片复制到文档旁的 assets/，返回相对于文档目录的路径。 */
+export function importImage(document: string, source: string): Promise<string> {
+  return invoke<string>("import_image", { document, source });
+}
+
 export function readText(path: string): Promise<string> {
   return invoke<string>("read_text", { path });
 }

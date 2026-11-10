@@ -46,13 +46,61 @@ export function loadMarkdown(markdown: string): void {
   }
   const text = markdown.replace(/\r\n?/g, "\n");
   const doc = parseMarkdown(editor.schema, text, documentOptions);
-  const state = EditorState.create({
+  const created = EditorState.create({
     schema: editor.schema,
     doc,
     plugins: editor.state.plugins,
   });
+  // 先跑一次各插件的 appendTransaction（如 TrailingNode 在以图片、表格结尾的文档末尾补空段落），
+  // 再记录未修改基线。否则打开后的第一个事务（如载入批注）会补出段落，文档被误标为「未保存」。
+  const normalizing = created.tr.setMeta("addToHistory", false);
+  const { state } = created.applyTransaction(normalizing);
   editor.view.updateState(state);
   markClean();
+}
+
+/** 一个页签的编辑现场：内容与撤销历史（EditorState）、换行写法、未修改基线和滚动位置。 */
+export interface DocumentSnapshot {
+  state: EditorState;
+  lineEnding: LineEnding;
+  options: MarkdownPipelineOptions;
+  clean: string;
+  scrollTop: number;
+}
+
+function scrollContainer(): HTMLElement | null {
+  return current?.view.dom.closest<HTMLElement>(".dc-editor-scroll") ?? null;
+}
+
+/** 保存当前编辑现场，切换页签前调用。 */
+export function snapshotDocument(): DocumentSnapshot | null {
+  const editor = current;
+  if (!editor) {
+    return null;
+  }
+  return {
+    state: editor.state,
+    lineEnding: documentLineEnding,
+    options: documentOptions,
+    clean: cleanMarkdown,
+    scrollTop: scrollContainer()?.scrollTop ?? 0,
+  };
+}
+
+/** 恢复页签的编辑现场。EditorState 来自同一编辑器实例，插件与撤销历史原样保留。 */
+export function restoreDocument(snapshot: DocumentSnapshot): void {
+  const editor = current;
+  if (!editor) {
+    return;
+  }
+  documentLineEnding = snapshot.lineEnding;
+  documentOptions = snapshot.options;
+  cleanMarkdown = snapshot.clean;
+  editor.view.updateState(snapshot.state);
+  const container = scrollContainer();
+  if (container) {
+    container.scrollTop = snapshot.scrollTop;
+  }
 }
 
 /** 把当前内容记为未修改的基线。载入文档和保存成功后调用。 */
@@ -138,6 +186,38 @@ export function revealText(probe: string): boolean {
     return false;
   }
   revealPosition(found);
+  return true;
+}
+
+/**
+ * 按不区分大小写的方式，在正文文本块中找到第 occurrence 处（从 0 起）出现的 query 并选中。
+ * 搜索在 Markdown 源文中计数，排版后的正文少了标记符号，序号可能对不上；超出时退回第一处。
+ * 匹配在单个文本节点内进行，不跨文本块、格式边界（如半句加粗）和行内原子节点（公式、图片）。
+ */
+export function revealOccurrence(query: string, occurrence: number): boolean {
+  const editor = current;
+  const needle = query.toLowerCase();
+  if (!editor || !needle) {
+    return false;
+  }
+  const hits: { from: number; to: number }[] = [];
+  editor.state.doc.descendants((node, pos) => {
+    if (!node.isText || !node.text) {
+      return true;
+    }
+    const haystack = node.text.toLowerCase();
+    let index = haystack.indexOf(needle);
+    while (index !== -1) {
+      hits.push({ from: pos + index, to: pos + index + needle.length });
+      index = haystack.indexOf(needle, index + needle.length);
+    }
+    return false;
+  });
+  if (hits.length === 0) {
+    return false;
+  }
+  const hit = hits[occurrence] ?? hits[0];
+  revealPosition(hit.from, hit.to);
   return true;
 }
 

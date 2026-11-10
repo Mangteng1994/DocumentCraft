@@ -1,7 +1,7 @@
 /**
  * 编辑区右键菜单。
  *
- * 常规编辑（剪切、复制、粘贴、全选）、插入表格、表格内的行列操作、添加批注，以及 Copilot 子菜单：
+ * 常规编辑（剪切、复制、粘贴、全选）、插入表格、插入图片、表格内的行列操作、添加批注，以及 Copilot 子菜单：
  * Quick Ask、添加选区到对话，和设置了「显示在右键菜单」的命令。菜单项旁显示当前绑定的快捷键。
  */
 
@@ -13,6 +13,7 @@ import type { ActionId } from "../settings/schema";
 import { useAppStore } from "../store";
 import { iconSize } from "../styles/tokens";
 import { useCopilot } from "../features/copilot/copilotStore";
+import { chooseAndInsertImage } from "./imageSupport";
 import { addSelectionToChat } from "../features/copilot/actions";
 import { anchorFromSelection } from "./annotations";
 import { currentSelection, isInTable, runTableAction, type TableAction } from "./editorCommands";
@@ -182,6 +183,7 @@ export function EditorContextMenu() {
     { label: "全选", run: () => editor?.chain().focus().selectAll().run() },
     "separator",
     { label: "插入表格…", hotkey: "insertTable", run: () => setOverlay({ kind: "insertTable" }) },
+    { label: "插入图片…", run: () => void chooseAndInsertImage() },
   ];
   if (inTable) {
     entries.push({ label: "表格", submenu: TABLE_ITEMS.map((item) => ({ label: item.label, run: () => runTableAction(item.action) })) });

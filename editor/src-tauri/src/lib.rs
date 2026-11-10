@@ -4,14 +4,36 @@
 //! sidecar 和用系统程序打开导出结果。VMark 原有的终端、MCP、多窗口、自动更新等后端模块不移植。
 
 mod docflow;
+mod images;
 mod settings;
 mod workspace;
 
 use tauri_plugin_opener::OpenerExt;
 
-/// 用系统默认程序打开导出的 Word、审核清单等文件。
+/// 不交给系统默认程序打开的扩展名：双击即会运行的程序、脚本和快捷方式。
+/// 目录树里点击文件会走 `open_path`，工作区中来历不明的程序不能因一次点击就被执行。
+const BLOCKED_OPEN_EXTENSIONS: [&str; 22] = [
+    "exe", "com", "bat", "cmd", "msi", "msp", "scr", "pif", "cpl", "lnk", "url", "ps1", "psm1", "vbs", "vbe",
+    "js", "jse", "wsf", "wsh", "hta", "jar", "reg",
+];
+
+fn is_blocked_for_open(path: &str) -> bool {
+    let extension = std::path::Path::new(path)
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(|value| value.to_ascii_lowercase());
+    match extension {
+        Some(value) => BLOCKED_OPEN_EXTENSIONS.contains(&value.as_str()),
+        None => false,
+    }
+}
+
+/// 用系统默认程序打开导出的 Word、审核清单，以及目录树中的非 Markdown 文件。程序和脚本拒绝打开。
 #[tauri::command]
 fn open_path(app: tauri::AppHandle, path: String) -> Result<(), String> {
+    if is_blocked_for_open(&path) {
+        return Err("出于安全考虑，不直接运行程序、脚本或快捷方式，请在资源管理器中自行处理。".to_string());
+    }
     let opener = app.opener();
     opener
         .open_path(path, None::<&str>)
@@ -58,6 +80,9 @@ pub fn run() {
             workspace::create_markdown,
             workspace::create_folder,
             workspace::remove_markdown,
+            workspace::search_workspace,
+            images::store_image,
+            images::import_image,
             settings::load_settings,
             settings::save_settings,
             docflow::docflow_run,
@@ -69,4 +94,19 @@ pub fn run() {
     builder
         .run(tauri::generate_context!())
         .expect("DocumentCraft 启动失败");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_blocked_for_open;
+
+    #[test]
+    fn executables_and_scripts_are_not_opened() {
+        assert!(is_blocked_for_open("C:\\work\\setup.EXE"));
+        assert!(is_blocked_for_open("C:\\work\\run.ps1"));
+        assert!(is_blocked_for_open("C:\\work\\链接.lnk"));
+        assert!(!is_blocked_for_open("C:\\work\\数据.xlsx"));
+        assert!(!is_blocked_for_open("C:\\work\\图.png"));
+        assert!(!is_blocked_for_open("C:\\work\\README"));
+    }
 }
