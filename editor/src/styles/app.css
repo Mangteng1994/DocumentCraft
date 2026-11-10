@@ -486,7 +486,23 @@ textarea {
 }
 
 .dc-tree-root {
+  flex: 1;
+  min-height: 0;
   padding: 0 var(--dc-space-sm) var(--dc-space-lg);
+  overflow-y: auto;
+}
+
+/* 文件树：头部（文件夹名与按钮）和新建输入框固定在顶部，只有文件列表滚动。 */
+.dc-tree {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.dc-tree > .dc-sidebar-header,
+.dc-tree > .dc-tree-create {
+  flex-shrink: 0;
 }
 
 .dc-tree-row {
