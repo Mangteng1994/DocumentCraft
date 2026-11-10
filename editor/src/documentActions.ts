@@ -3,11 +3,12 @@
  */
 
 import { ask, open } from "@tauri-apps/plugin-dialog";
-import { docflow, errorText, listTree, readText, writeText } from "./backend";
+import { createFolder, createMarkdown, docflow, errorText, listTree, readText, writeText } from "./backend";
 import { setDocumentDirectory } from "./editor/assets";
-import { currentMarkdown, getEditor, loadMarkdown } from "./editor/editorHandle";
+import { currentMarkdown, getEditor, loadMarkdown, markClean } from "./editor/editorHandle";
 import { setAnnotationMeta, type Note, type NoteAnchor } from "./editor/annotations";
 import { fileName, parentDirectory } from "./paths";
+import { useSettings } from "./settings/settingsStore";
 import { useAppStore } from "./store";
 
 /** 有未保存修改时询问是否保存，返回 false 表示用户取消了后续操作。 */
@@ -28,13 +29,46 @@ async function confirmLeave(): Promise<boolean> {
   return true;
 }
 
+function showAllFiles(): boolean {
+  return useSettings.getState().settings.files.showAllFiles;
+}
+
+/** 在目录下新建 Markdown 并打开。名称缺少 .md 扩展名时自动补上。成功返回新文件路径，失败返回 null。 */
+export async function createNote(directory: string, name: string): Promise<string | null> {
+  const store = useAppStore.getState();
+  const hasExtension = /\.(md|markdown)$/i.test(name.trim());
+  const entryName = hasExtension ? name.trim() : `${name.trim()}.md`;
+  try {
+    const path = await createMarkdown(directory, entryName);
+    await refreshTree();
+    await openDocument(path);
+    return path;
+  } catch (error) {
+    store.setStatus(errorText(error));
+    return null;
+  }
+}
+
+/** 在目录下新建文件夹。成功返回路径，失败返回 null。 */
+export async function createFolderIn(directory: string, name: string): Promise<string | null> {
+  const store = useAppStore.getState();
+  try {
+    const path = await createFolder(directory, name.trim());
+    await refreshTree();
+    return path;
+  } catch (error) {
+    store.setStatus(errorText(error));
+    return null;
+  }
+}
+
 export async function refreshTree(): Promise<void> {
   const store = useAppStore.getState();
   if (!store.workspace) {
     return;
   }
   try {
-    const tree = await listTree(store.workspace);
+    const tree = await listTree(store.workspace, showAllFiles());
     store.setTree(tree);
   } catch (error) {
     store.setStatus(errorText(error));
@@ -52,7 +86,7 @@ export async function chooseWorkspace(): Promise<void> {
 export async function openWorkspace(root: string): Promise<void> {
   const store = useAppStore.getState();
   try {
-    const tree = await listTree(root);
+    const tree = await listTree(root, showAllFiles());
     store.setWorkspace(root, tree);
     store.setSidebarView("files");
   } catch (error) {
@@ -111,6 +145,7 @@ export async function saveDocument(): Promise<boolean> {
   try {
     const markdown = currentMarkdown();
     await writeText(store.filePath, markdown);
+    markClean();
     store.setDirty(false);
     store.setStatus("已保存");
     return true;

@@ -12,6 +12,7 @@ import { iconSize } from "../../styles/tokens";
 import { AIConnectionSettings } from "./AIConnectionSettings";
 import { AppearanceSettings } from "./AppearanceSettings";
 import { CopilotSettings } from "./CopilotSettings";
+import { FilesSettings } from "./FilesSettings";
 import { FigureSettings } from "./FigureSettings";
 import { HotkeySettings } from "./HotkeySettings";
 import { WordExportSettings } from "./WordExportSettings";
@@ -21,6 +22,7 @@ const GROUPS: { title: string; tabs: { id: SettingsTab; label: string }[] }[] = 
     title: "选项",
     tabs: [
       { id: "appearance", label: "外观" },
+      { id: "files", label: "文件" },
       { id: "hotkeys", label: "快捷键" },
     ],
   },
@@ -42,6 +44,7 @@ const GROUPS: { title: string; tabs: { id: SettingsTab; label: string }[] }[] = 
 
 const TAB_CONTENT: Record<SettingsTab, () => ReactNode> = {
   appearance: () => <AppearanceSettings />,
+  files: () => <FilesSettings />,
   hotkeys: () => <HotkeySettings />,
   copilot: () => <CopilotSettings />,
   ai: () => <AIConnectionSettings />,

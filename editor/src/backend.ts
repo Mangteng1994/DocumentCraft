@@ -11,8 +11,19 @@ export interface TreeNode {
   children: TreeNode[];
 }
 
-export function listTree(root: string): Promise<TreeNode> {
-  return invoke<TreeNode>("list_tree", { root });
+/** showAll 为真时列出全部文件和空文件夹，否则只列 Markdown。 */
+export function listTree(root: string, showAll = false): Promise<TreeNode> {
+  return invoke<TreeNode>("list_tree", { root, showAll });
+}
+
+/** 在目录下新建空 Markdown 文件，返回路径；同名文件已存在时抛错。 */
+export function createMarkdown(directory: string, name: string): Promise<string> {
+  return invoke<string>("create_markdown", { directory, name });
+}
+
+/** 在目录下新建文件夹，返回路径；同名条目已存在时抛错。 */
+export function createFolder(directory: string, name: string): Promise<string> {
+  return invoke<string>("create_folder", { directory, name });
 }
 
 export function readText(path: string): Promise<string> {

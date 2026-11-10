@@ -5,7 +5,7 @@
 import { useEffect, useRef } from "react";
 import { EditorContent, useEditor } from "@tiptap/react";
 import { createExtensions } from "./extensions";
-import { extractDocumentHeadings, getEditor, setEditor } from "./editorHandle";
+import { differsFromClean, extractDocumentHeadings, getEditor, setEditor } from "./editorHandle";
 import { selectNote } from "../documentActions";
 import { captureEditorSelection } from "../features/copilot/actions";
 import { useAppStore } from "../store";
@@ -64,7 +64,12 @@ export function MarkdownEditor() {
       }, OUTLINE_DELAY_MS);
     },
     onUpdate: () => {
-      useAppStore.getState().setDirty(true);
+      const store = useAppStore.getState();
+      // 已是未保存状态时无需再比较；首次变化才序列化一次，排除载入后编辑器自行规范文档造成的更新。
+      if (!store.dirty && !differsFromClean()) {
+        return;
+      }
+      store.setDirty(true);
     },
   });
 

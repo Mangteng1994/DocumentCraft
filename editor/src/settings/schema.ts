@@ -35,6 +35,10 @@ export interface Settings {
   appearance: {
     theme: ThemeMode;
   };
+  files: {
+    /** 目录树除 Markdown 外也列出其他文件，并保留空文件夹。 */
+    showAllFiles: boolean;
+  };
   hotkeys: Hotkeys;
   copilot: {
     /** 工作区内的 Copilot 文件夹，对话记录和命令分别存于其下的 copilot-conversations/、copilot-custom-prompts/。 */
@@ -62,6 +66,7 @@ function defaultHotkeys(): Hotkeys {
 
 export const DEFAULT_SETTINGS: Settings = {
   appearance: { theme: "system" },
+  files: { showAllFiles: false },
   hotkeys: defaultHotkeys(),
   copilot: {
     folder: "copilot",
@@ -98,6 +103,7 @@ export function normalizeSettings(saved: unknown): Settings {
   const root = isRecord(saved) ? saved : {};
   return {
     appearance: mergeSection(DEFAULT_SETTINGS.appearance, root.appearance),
+    files: mergeSection(DEFAULT_SETTINGS.files, root.files),
     hotkeys: mergeSection(DEFAULT_SETTINGS.hotkeys, root.hotkeys),
     copilot: mergeSection(DEFAULT_SETTINGS.copilot, root.copilot),
     wordExport: mergeSection(DEFAULT_SETTINGS.wordExport, root.wordExport),

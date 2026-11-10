@@ -44,6 +44,8 @@
 | DC-043 | 编辑快捷键 | 默认 Ctrl+1～6 为 1～6 级标题、Ctrl+0 为正文段落、Ctrl+T 插入表格；全部快捷键可录制、清除、恢复默认，冲突时提示并移除原绑定 | 已验收（模拟 IPC，真实按键） · `editor/src/settings/` |
 | DC-044 | 编辑区右键菜单与插入表格 | 右键菜单含剪切、复制、粘贴、全选、插入表格、表格增删行列、添加批注和 Copilot 子菜单；插入表格可在网格中选择行列数，首行为表头 | 已验收（模拟 IPC） · `editor/src/editor/EditorContextMenu.tsx`、`InsertTablePicker.tsx` |
 | DC-045 | Copilot 命令与 Quick Ask | 命令以 Markdown 保存在 copilot-custom-prompts/，格式与 Obsidian Copilot 相同，可生成默认命令；右键或快捷键打开 Quick Ask，结果可复制、插入、替换选区或追问 | 已验收（模拟 IPC） · `editor/src/features/copilot/` |
+| DC-046 | 显示所有文件 | 「设置 → 文件」可开启显示所有文件：目录树列出工作区内全部文件和空文件夹（隐藏目录仍不显示），非 Markdown 文件置灰、点击只提示不能打开；默认关闭，保持只显示 Markdown | 已验收（模拟 IPC）· `editor/src/features/settings/FilesSettings.tsx`、`src-tauri/src/workspace.rs` 的 `list_tree(show_all)`；Rust 测试覆盖 |
+| DC-047 | 目录树新建 Markdown 与文件夹 | 文件栏头部有「新建 Markdown」「新建文件夹」按钮，在最近点击的文件夹（默认工作区根目录）下输入名称创建；Markdown 缺扩展名时补 .md 并打开；同名、含非法字符的名称被拒绝且不覆盖；默认视图中完全空的文件夹也保留 | 已验收（模拟 IPC）· `editor/src/sidebar/FileTree.tsx`、`documentActions.ts`、`workspace.rs` 的 `create_markdown`/`create_folder`；Rust 测试覆盖 |
 
 ## Should
 
@@ -186,3 +188,11 @@ foreach ($step in 'save','reopen','style','full','skip','plain') {
 - 现象：安装后启动报「找不到 WebView2Loader.dll」。原因：gnullvm 构建动态链接 WebView2Loader.dll 与 libunwind.dll，安装包未携带；开发机 PATH 里恰好有 libunwind 所以未暴露。
 - 修复：`scripts/stage-runtime.ps1` 暂存两个 DLL 到 `out/runtime/`，`tauri.bundle.conf.json` 作为资源安装到 exe 同目录，`npm run bundle` 自动先执行。
 - 验收：按安装布局复制到临时目录，PATH 仅含 System32 启动，进程正常运行；未实际运行安装程序。
+
+## 2026-11-10 显示所有文件与新建按钮
+
+- Rust 测试 6 项通过（含显示所有文件、空文件夹、新建不覆盖、非法名称）；tsc 与 vite build 通过。
+- 浏览器加载真实 `App` 并模拟 IPC：新建文件夹、在新文件夹内新建笔记并打开、重名时状态栏提示且输入框保留、Esc 取消；设置中开关「显示所有文件」后目录树出现置灰的 .csv。
+- 顺带修复：打开空的 Markdown 会被标为「未保存」（编辑器载入后自行规范文档触发更新），现与载入基线比较，只有内容真的变化才标记。
+- 未执行：原生窗口内点击；新安装包尚未重新打包。
+

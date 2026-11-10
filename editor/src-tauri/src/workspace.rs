@@ -46,7 +46,15 @@ fn is_ordinary(metadata: &fs::Metadata) -> bool {
     true
 }
 
-fn read_dir_node(path: &Path, depth: usize) -> Option<TreeNode> {
+/// 目录下没有任何条目（含隐藏条目）。
+fn is_empty_dir(path: &Path) -> bool {
+    match fs::read_dir(path) {
+        Ok(mut entries) => entries.next().is_none(),
+        Err(_) => false,
+    }
+}
+
+fn read_dir_node(path: &Path, depth: usize, show_all: bool) -> Option<TreeNode> {
     let name = path
         .file_name()
         .map(|value| value.to_string_lossy().into_owned())
@@ -78,13 +86,14 @@ fn read_dir_node(path: &Path, depth: usize) -> Option<TreeNode> {
         }
         let entry_path = entry.path();
         if metadata.is_dir() {
-            if let Some(child) = read_dir_node(&entry_path, depth + 1) {
-                // 只保留包含 Markdown 的目录，目录树聚焦于可阅读的文档。
-                if !child.children.is_empty() {
+            if let Some(child) = read_dir_node(&entry_path, depth + 1, show_all) {
+                // 默认只保留包含 Markdown 的目录，目录树聚焦于可阅读的文档。完全空的目录也保留，
+                // 否则刚新建的文件夹会立刻从目录树消失；显示全部文件时所有目录都保留。
+                if show_all || !child.children.is_empty() || is_empty_dir(&entry_path) {
                     directories.push(child);
                 }
             }
-        } else if is_markdown(&entry_path) {
+        } else if show_all || is_markdown(&entry_path) {
             files.push(TreeNode {
                 name: entry_name,
                 path: entry_path.to_string_lossy().into_owned(),
@@ -100,15 +109,16 @@ fn read_dir_node(path: &Path, depth: usize) -> Option<TreeNode> {
     Some(node)
 }
 
-/// 列出工作区目录树，只包含 Markdown 文件和含 Markdown 的目录。
+/// 列出工作区目录树。默认只包含 Markdown 文件和含 Markdown 的目录；`show_all` 为真时列出全部文件和目录。
 #[tauri::command]
-pub async fn list_tree(root: String) -> Result<TreeNode, String> {
+pub async fn list_tree(root: String, show_all: Option<bool>) -> Result<TreeNode, String> {
+    let show_all = show_all.unwrap_or(false);
     let task = tauri::async_runtime::spawn_blocking(move || {
         let path = PathBuf::from(&root);
         if !path.is_dir() {
             return Err(format!("工作区不是文件夹：{root}"));
         }
-        read_dir_node(&path, 0).ok_or_else(|| format!("无法读取工作区：{root}"))
+        read_dir_node(&path, 0, show_all).ok_or_else(|| format!("无法读取工作区：{root}"))
     });
     task.await.map_err(|error| error.to_string())?
 }
@@ -166,6 +176,50 @@ pub fn create_dir(path: String) -> Result<(), String> {
     fs::create_dir_all(&path).map_err(|error| format!("无法创建目录 {path}：{error}"))
 }
 
+/// 校验新建条目的名称：单个路径片段，不含分隔符、Windows 保留字符和结尾的点或空格。
+fn validate_entry_name(name: &str) -> Result<(), String> {
+    let trimmed = name.trim();
+    if trimmed.is_empty() || trimmed != name {
+        return Err("名称不能为空，且不能以空格开头或结尾。".to_string());
+    }
+    if name.ends_with('.') || name == ".." {
+        return Err("名称不能以点结尾。".to_string());
+    }
+    if name.chars().any(|ch| ch.is_control() || "<>:\"/\\|?*".contains(ch)) {
+        return Err("名称不能包含 < > : \" / \\ | ? * 等字符。".to_string());
+    }
+    Ok(())
+}
+
+/// 在指定目录下新建空的 Markdown 文件，返回其路径。已存在同名条目时拒绝，不覆盖。
+#[tauri::command]
+pub fn create_markdown(directory: String, name: String) -> Result<String, String> {
+    validate_entry_name(&name)?;
+    let target = Path::new(&directory).join(&name);
+    if !is_markdown(&target) {
+        return Err("文件名需以 .md 或 .markdown 结尾。".to_string());
+    }
+    // create_new 保证不会覆盖已有文件。
+    let file = fs::OpenOptions::new().write(true).create_new(true).open(&target);
+    match file {
+        Ok(_) => Ok(target.to_string_lossy().into_owned()),
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => Err(format!("已存在同名文件：{name}")),
+        Err(error) => Err(format!("无法创建 {name}：{error}")),
+    }
+}
+
+/// 在指定目录下新建文件夹，返回其路径。已存在同名条目时拒绝。
+#[tauri::command]
+pub fn create_folder(directory: String, name: String) -> Result<String, String> {
+    validate_entry_name(&name)?;
+    let target = Path::new(&directory).join(&name);
+    match fs::create_dir(&target) {
+        Ok(()) => Ok(target.to_string_lossy().into_owned()),
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => Err(format!("已存在同名条目：{name}")),
+        Err(error) => Err(format!("无法创建 {name}：{error}")),
+    }
+}
+
 /// 删除一个 Markdown 文件（如 Copilot 对话记录或命令）。前端在调用前已向用户确认。
 #[tauri::command]
 pub fn remove_markdown(path: String) -> Result<(), String> {
@@ -193,18 +247,47 @@ mod tests {
     }
 
     #[test]
-    fn tree_lists_markdown_and_skips_hidden_and_empty_folders() {
+    fn tree_lists_markdown_keeps_empty_folders_and_skips_hidden() {
         let root = scratch("tree");
         fs::write(root.join("报告.md"), "# 报告\n").unwrap();
         fs::write(root.join("说明.txt"), "x").unwrap();
         fs::write(root.join("子目录").join("笔记.markdown"), "# 笔记\n").unwrap();
         fs::write(root.join(".hidden").join("隐藏.md"), "# 隐藏\n").unwrap();
-        let tree = read_dir_node(&root, 0).unwrap();
+        let tree = read_dir_node(&root, 0, false).unwrap();
         let names: Vec<&str> = tree.children.iter().map(|node| node.name.as_str()).collect();
         assert_eq!(names, vec!["子目录", "报告.md"]);
         let folder = &tree.children[0];
         let inner: Vec<&str> = folder.children.iter().map(|node| node.name.as_str()).collect();
-        assert_eq!(inner, vec!["笔记.markdown"]);
+        assert_eq!(inner, vec!["空目录", "笔记.markdown"]);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn show_all_lists_other_files_and_empty_folders() {
+        let root = scratch("all");
+        fs::write(root.join("说明.txt"), "x").unwrap();
+        fs::write(root.join(".hidden").join("隐藏.md"), "# 隐藏
+").unwrap();
+        let tree = read_dir_node(&root, 0, true).unwrap();
+        let names: Vec<&str> = tree.children.iter().map(|node| node.name.as_str()).collect();
+        assert_eq!(names, vec!["子目录", "说明.txt"]);
+        assert_eq!(tree.children[0].children.len(), 1);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn create_entries_refuse_overwrite_and_bad_names() {
+        let root = scratch("create");
+        let dir = root.to_string_lossy().into_owned();
+        let created = create_markdown(dir.clone(), "新笔记.md".to_string()).unwrap();
+        fs::write(&created, "keep").unwrap();
+        assert!(create_markdown(dir.clone(), "新笔记.md".to_string()).is_err());
+        assert_eq!(fs::read_to_string(&created).unwrap(), "keep");
+        assert!(create_markdown(dir.clone(), "a.txt".to_string()).is_err());
+        assert!(create_markdown(dir.clone(), "..\\x.md".to_string()).is_err());
+        assert!(create_folder(dir.clone(), "新文件夹".to_string()).is_ok());
+        assert!(create_folder(dir.clone(), "新文件夹".to_string()).is_err());
+        assert!(create_folder(dir, "a/b".to_string()).is_err());
         let _ = fs::remove_dir_all(&root);
     }
 
