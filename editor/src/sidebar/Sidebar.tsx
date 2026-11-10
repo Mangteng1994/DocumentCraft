@@ -5,6 +5,7 @@
 import { FileTree } from "./FileTree";
 import { OutlineView } from "./OutlineView";
 import { SearchView } from "./SearchView";
+import { PaneResizer } from "../components/PaneResizer";
 import { useAppStore, type SidebarView } from "../store";
 
 const VIEWS: { id: SidebarView; label: string }[] = [
@@ -38,6 +39,7 @@ export function Sidebar() {
         {view === "outline" && <OutlineView />}
         {view === "search" && <SearchView />}
       </div>
+      <PaneResizer pane="sidebar" />
     </aside>
   );
 }

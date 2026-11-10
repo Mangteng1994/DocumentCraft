@@ -46,13 +46,61 @@ export function loadMarkdown(markdown: string): void {
   }
   const text = markdown.replace(/\r\n?/g, "\n");
   const doc = parseMarkdown(editor.schema, text, documentOptions);
-  const state = EditorState.create({
+  const created = EditorState.create({
     schema: editor.schema,
     doc,
     plugins: editor.state.plugins,
   });
+  // 先跑一次各插件的 appendTransaction（如 TrailingNode 在以图片、表格结尾的文档末尾补空段落），
+  // 再记录未修改基线。否则打开后的第一个事务（如载入批注）会补出段落，文档被误标为「未保存」。
+  const normalizing = created.tr.setMeta("addToHistory", false);
+  const { state } = created.applyTransaction(normalizing);
   editor.view.updateState(state);
   markClean();
+}
+
+/** 一个页签的编辑现场：内容与撤销历史（EditorState）、换行写法、未修改基线和滚动位置。 */
+export interface DocumentSnapshot {
+  state: EditorState;
+  lineEnding: LineEnding;
+  options: MarkdownPipelineOptions;
+  clean: string;
+  scrollTop: number;
+}
+
+function scrollContainer(): HTMLElement | null {
+  return current?.view.dom.closest<HTMLElement>(".dc-editor-scroll") ?? null;
+}
+
+/** 保存当前编辑现场，切换页签前调用。 */
+export function snapshotDocument(): DocumentSnapshot | null {
+  const editor = current;
+  if (!editor) {
+    return null;
+  }
+  return {
+    state: editor.state,
+    lineEnding: documentLineEnding,
+    options: documentOptions,
+    clean: cleanMarkdown,
+    scrollTop: scrollContainer()?.scrollTop ?? 0,
+  };
+}
+
+/** 恢复页签的编辑现场。EditorState 来自同一编辑器实例，插件与撤销历史原样保留。 */
+export function restoreDocument(snapshot: DocumentSnapshot): void {
+  const editor = current;
+  if (!editor) {
+    return;
+  }
+  documentLineEnding = snapshot.lineEnding;
+  documentOptions = snapshot.options;
+  cleanMarkdown = snapshot.clean;
+  editor.view.updateState(snapshot.state);
+  const container = scrollContainer();
+  if (container) {
+    container.scrollTop = snapshot.scrollTop;
+  }
 }
 
 /** 把当前内容记为未修改的基线。载入文档和保存成功后调用。 */

@@ -24,11 +24,19 @@ export interface ContextMenuState {
   y: number;
 }
 
+/** 编辑区顶部的一个页签。内容和撤销历史保存在 documentActions 的页签现场中。 */
+export interface DocumentTab {
+  path: string;
+  dirty: boolean;
+}
+
 export interface AppState {
   workspace: string | null;
   tree: TreeNode | null;
   filePath: string | null;
   dirty: boolean;
+  /** 打开的页签，顺序即显示顺序；filePath 为当前页签。 */
+  tabs: DocumentTab[];
   headings: HeadingItem[];
   /** 文档内容每次变化后递增，供批注面板刷新定位状态。 */
   docVersion: number;
@@ -52,6 +60,9 @@ export interface AppState {
   setTree: (tree: TreeNode | null) => void;
   setFilePath: (path: string | null) => void;
   setDirty: (dirty: boolean) => void;
+  /** 在当前页签右侧加入页签；已存在时不变。 */
+  openTab: (path: string) => void;
+  removeTab: (path: string) => void;
   setHeadings: (headings: HeadingItem[]) => void;
   bumpDocVersion: () => void;
   setNotes: (notes: Note[]) => void;
@@ -73,6 +84,7 @@ export const useAppStore = create<AppState>((set) => ({
   tree: null,
   filePath: null,
   dirty: false,
+  tabs: [],
   headings: [],
   docVersion: 0,
   notes: [],
@@ -90,7 +102,23 @@ export const useAppStore = create<AppState>((set) => ({
   setWorkspace: (workspace, tree) => set({ workspace, tree }),
   setTree: (tree) => set({ tree }),
   setFilePath: (filePath) => set({ filePath }),
-  setDirty: (dirty) => set({ dirty }),
+  // 未保存状态同时记在当前页签上，切换页签后据此恢复。
+  setDirty: (dirty) =>
+    set((state) => ({
+      dirty,
+      tabs: state.tabs.map((tab) => (tab.path === state.filePath ? { ...tab, dirty } : tab)),
+    })),
+  openTab: (path) =>
+    set((state) => {
+      if (state.tabs.some((tab) => tab.path === path)) {
+        return {};
+      }
+      const index = state.tabs.findIndex((tab) => tab.path === state.filePath);
+      const tabs = [...state.tabs];
+      tabs.splice(index + 1, 0, { path, dirty: false });
+      return { tabs };
+    }),
+  removeTab: (path) => set((state) => ({ tabs: state.tabs.filter((tab) => tab.path !== path) })),
   setHeadings: (headings) => set({ headings }),
   bumpDocVersion: () => set((state) => ({ docVersion: state.docVersion + 1 })),
   setNotes: (notes) => set({ notes }),

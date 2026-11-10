@@ -22,6 +22,9 @@ export const ACTIONS = [
   { id: "paragraph", label: "正文段落", scope: "editor", defaultKey: "Ctrl+0" },
   { id: "insertTable", label: "插入表格", scope: "editor", defaultKey: "Ctrl+T" },
   { id: "save", label: "保存", scope: "global", defaultKey: "Ctrl+S" },
+  { id: "closeTab", label: "关闭当前页签", scope: "global", defaultKey: "Ctrl+W" },
+  { id: "nextTab", label: "下一个页签", scope: "global", defaultKey: "Ctrl+Tab" },
+  { id: "previousTab", label: "上一个页签", scope: "global", defaultKey: "Ctrl+Shift+Tab" },
   { id: "searchWorkspace", label: "在工作区中搜索", scope: "global", defaultKey: "Ctrl+Shift+F" },
   { id: "openSettings", label: "打开设置", scope: "global", defaultKey: "Ctrl+," },
   { id: "toggleCopilot", label: "打开或关闭 Copilot", scope: "global", defaultKey: "Ctrl+Shift+L" },
@@ -58,6 +61,11 @@ export interface Settings {
   figure: {
     style: FigureStyle;
   };
+  layout: {
+    /** 左侧栏与右侧栏宽度（像素），0 表示使用设计令牌中的默认宽度。 */
+    sidebarWidth: number;
+    panelWidth: number;
+  };
   history: {
     /** 最近打开的工作区文件夹，最新的在前，最多 MAX_RECENT_WORKSPACES 个。 */
     recentWorkspaces: string[];
@@ -85,6 +93,7 @@ export const DEFAULT_SETTINGS: Settings = {
   },
   wordExport: { template: "", mode: "auto", includeNotes: true },
   figure: { style: "mono" },
+  layout: { sidebarWidth: 0, panelWidth: 0 },
   history: { recentWorkspaces: [] },
 };
 
@@ -134,6 +143,7 @@ export function normalizeSettings(saved: unknown): Settings {
     copilot: mergeSection(DEFAULT_SETTINGS.copilot, root.copilot),
     wordExport: mergeSection(DEFAULT_SETTINGS.wordExport, root.wordExport),
     figure: mergeSection(DEFAULT_SETTINGS.figure, root.figure),
+    layout: mergeSection(DEFAULT_SETTINGS.layout, root.layout),
     history: { recentWorkspaces: normalizeRecentWorkspaces(root.history) },
   };
 }

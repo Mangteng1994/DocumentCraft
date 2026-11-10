@@ -1,7 +1,7 @@
 /**
  * 应用外壳，布局参照 Obsidian：
- * 左侧 Ribbon（打开文件夹、打开文件、Copilot、批注，底部为设置）、左侧栏（文件 / 大纲）、
- * 中间编辑区（顶部视图标题）、右侧栏（Copilot / 批注）和状态栏。
+ * 左侧 Ribbon（打开文件夹、打开文件、Copilot、批注，底部为设置）、左侧栏（文件 / 大纲 / 搜索）、
+ * 中间编辑区（顶部文档页签）、右侧栏（Copilot / 批注）和状态栏（左侧为工作区切换）。左右侧栏可拖动调宽。
  * MD 转 Word 与科研流程图从「设置」进入，不在主界面放置按钮。
  */
 
@@ -19,7 +19,10 @@ import { QuickAsk } from "./features/copilot/QuickAsk";
 import { useCopilot } from "./features/copilot/copilotStore";
 import { toggleCopilot } from "./features/copilot/actions";
 import { SettingsModal } from "./features/settings/SettingsModal";
+import { DocumentTabs } from "./components/DocumentTabs";
+import { PaneResizer, paneWidthStyle } from "./components/PaneResizer";
 import { RecentWorkspaces } from "./components/RecentWorkspaces";
+import { WorkspaceSwitcher } from "./components/WorkspaceSwitcher";
 import { chooseFile, chooseWorkspace } from "./documentActions";
 import { fileName } from "./paths";
 import { useSettings } from "./settings/settingsStore";
@@ -80,6 +83,7 @@ export function App() {
   const loadSettings = useSettings((state) => state.load);
   const copilotFolder = useSettings((state) => state.settings.copilot.folder);
   const reloadCommands = useCopilot((state) => state.reloadCommands);
+  const layout = useSettings((state) => state.settings.layout);
 
   useTheme();
   useHotkeys();
@@ -93,15 +97,16 @@ export function App() {
     void reloadCommands();
   }, [workspace, copilotFolder, reloadCommands]);
 
-  // 关闭窗口前提示未保存的修改。
+  // 关闭窗口前检查所有页签的未保存修改。
   useEffect(() => {
     const appWindow = getCurrentWindow();
     const unlisten = appWindow.onCloseRequested(async (event) => {
-      const { dirty: unsaved, filePath: path } = useAppStore.getState();
-      if (!unsaved || !path) {
+      const unsaved = useAppStore.getState().tabs.filter((tab) => tab.dirty);
+      if (unsaved.length === 0) {
         return;
       }
-      const discard = await ask(`「${fileName(path)}」有未保存的修改，仍要关闭吗？`, {
+      const names = unsaved.map((tab) => `「${fileName(tab.path)}」`).join("、");
+      const discard = await ask(`${names}有未保存的修改，仍要关闭吗？`, {
         title: "DocumentCraft",
         kind: "warning",
         okLabel: "不保存并关闭",
@@ -141,15 +146,10 @@ export function App() {
         <RibbonButton label="设置" icon={<Settings {...ribbonIcon} />} onClick={() => openSettings()} />
       </nav>
 
-      <div className={`dc-workbench${rightPanel ? " has-panel" : ""}`}>
+      <div className={`dc-workbench${rightPanel ? " has-panel" : ""}`} style={paneWidthStyle(layout.sidebarWidth, layout.panelWidth)}>
         <Sidebar />
         <main className="dc-main">
-          {hasDocument && (
-            <header className="dc-view-header">
-              <span className="dc-view-title">{fileName(filePath)}</span>
-              {dirty && <span className="dc-view-dirty" title="未保存" aria-label="未保存" />}
-            </header>
-          )}
+          {hasDocument && <DocumentTabs />}
           {/* 编辑器常驻，避免切换文档时重建 ProseMirror 视图。 */}
           <div className={hasDocument ? "dc-editor-area" : "dc-editor-area is-hidden"}>
             <MarkdownEditor />
@@ -158,6 +158,7 @@ export function App() {
         </main>
         {rightPanel && (
           <aside className="dc-panel" aria-label={rightPanel === "comments" ? "批注" : "Copilot"}>
+            <PaneResizer pane="panel" />
             <div className="dc-panel-header">
               <h2 className="dc-panel-title">{rightPanel === "comments" ? "批注" : "Copilot"}</h2>
               <button type="button" className="dc-icon-button" aria-label="关闭侧栏" onClick={() => setRightPanel(null)}>
@@ -170,6 +171,7 @@ export function App() {
       </div>
 
       <footer className="dc-statusbar">
+        <WorkspaceSwitcher />
         <span className="dc-statusbar-path" title={filePath ?? ""}>
           {filePath ?? "未打开文档"}
         </span>

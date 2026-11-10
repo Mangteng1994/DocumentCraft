@@ -4,6 +4,7 @@
 //! sidecar 和用系统程序打开导出结果。VMark 原有的终端、MCP、多窗口、自动更新等后端模块不移植。
 
 mod docflow;
+mod images;
 mod settings;
 mod workspace;
 
@@ -80,6 +81,8 @@ pub fn run() {
             workspace::create_folder,
             workspace::remove_markdown,
             workspace::search_workspace,
+            images::store_image,
+            images::import_image,
             settings::load_settings,
             settings::save_settings,
             docflow::docflow_run,

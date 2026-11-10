@@ -13,6 +13,7 @@ import { Table, TableCell, TableHeader, TableRow } from "@tiptap/extension-table
 import katex from "katex";
 import { resolveImageSource } from "./assets";
 import { annotationExtension } from "./annotations";
+import { imageSupportExtension } from "./imageSupport";
 
 /** 管线为块节点记录的空行数和源码行号，参与原文空行的保留。 */
 const BLOCK_TYPES = [
@@ -99,15 +100,25 @@ function simpleMark(name: string, tag: string) {
   });
 }
 
+/**
+ * 图片 src 属性：显示时转成 WebView 可加载的地址，原始路径另存于 data-src。
+ * 从编辑区复制再粘贴时按 data-src 取回原始路径，避免把 asset:// 地址写进 Markdown。
+ */
+const imageSourceAttribute = {
+  default: "",
+  parseHTML: (element: HTMLElement) => element.getAttribute("data-src") ?? element.getAttribute("src") ?? "",
+  renderHTML: (attributes: Record<string, unknown>) => ({
+    src: resolveImageSource(attributes.src),
+    "data-src": attributes.src,
+  }),
+};
+
 const InlineImage = Image.extend({
   inline: true,
   group: "inline",
   addAttributes() {
     return {
-      src: {
-        default: "",
-        renderHTML: (attributes) => ({ src: resolveImageSource(attributes.src) }),
-      },
+      src: imageSourceAttribute,
       alt: { default: null },
       title: { default: null },
     };
@@ -121,10 +132,7 @@ const BlockImage = Node.create({
   draggable: true,
   addAttributes() {
     return {
-      src: {
-        default: "",
-        renderHTML: (attributes) => ({ src: resolveImageSource(attributes.src) }),
-      },
+      src: imageSourceAttribute,
       alt: { default: "" },
       title: { default: "" },
     };
@@ -312,5 +320,6 @@ export function createExtensions() {
     HtmlInline,
     HtmlBlock,
     annotationExtension,
+    imageSupportExtension,
   ];
 }

@@ -5,14 +5,23 @@
 import { ask, open } from "@tauri-apps/plugin-dialog";
 import { createFolder, createMarkdown, docflow, errorText, listTree, openPath, readText, writeText } from "./backend";
 import { setDocumentDirectory } from "./editor/assets";
-import { currentMarkdown, getEditor, loadMarkdown, markClean, revealOccurrence } from "./editor/editorHandle";
+import {
+  currentMarkdown,
+  getEditor,
+  loadMarkdown,
+  markClean,
+  restoreDocument,
+  revealOccurrence,
+  snapshotDocument,
+  type DocumentSnapshot,
+} from "./editor/editorHandle";
 import { setAnnotationMeta, type Note, type NoteAnchor } from "./editor/annotations";
 import { fileName, parentDirectory } from "./paths";
 import { MAX_RECENT_WORKSPACES } from "./settings/schema";
 import { useSettings } from "./settings/settingsStore";
 import { useAppStore } from "./store";
 
-/** 有未保存修改时询问是否保存，返回 false 表示用户取消了后续操作。 */
+/** 关闭有未保存修改的页签前询问是否保存，返回 false 表示保存失败、操作中止。 */
 async function confirmLeave(): Promise<boolean> {
   const { dirty, filePath } = useAppStore.getState();
   if (!dirty || !filePath) {
@@ -153,29 +162,116 @@ export async function chooseFile(): Promise<void> {
   await openDocument(selected);
 }
 
+/** 各页签的编辑现场，键为文档路径。当前页签的现场在切走时才写入。 */
+const snapshots = new Map<string, DocumentSnapshot>();
+
+/** 切走前保存当前页签的编辑现场。 */
+function rememberCurrent(): void {
+  const { filePath } = useAppStore.getState();
+  if (!filePath) {
+    return;
+  }
+  const snapshot = snapshotDocument();
+  if (snapshot) {
+    snapshots.set(filePath, snapshot);
+  }
+}
+
+/** 编辑器已显示 path 的内容后，同步当前文档、未保存状态和批注。 */
+async function activate(path: string, dirty: boolean): Promise<void> {
+  const store = useAppStore.getState();
+  store.setFilePath(path);
+  store.setDirty(dirty);
+  store.setActiveNoteId(null);
+  store.setStatus("");
+  await loadNotes();
+}
+
+/**
+ * 打开文档：已在页签中时切换过去，保留其内容、撤销历史和未保存修改；否则读取文件并在当前页签右侧新开页签。
+ * force 为真时从磁盘重新读取，丢弃该页签中的修改。
+ */
 export async function openDocument(path: string, options: { force?: boolean } = {}): Promise<boolean> {
   const store = useAppStore.getState();
   if (!options.force && path === store.filePath) {
     return true;
   }
-  const proceed = await confirmLeave();
-  if (!proceed) {
-    return false;
+  const existing = store.tabs.find((tab) => tab.path === path);
+  const snapshot = snapshots.get(path);
+  if (existing && snapshot && !options.force) {
+    rememberCurrent();
+    // 图片相对路径在渲染时解析，需先切换基准目录再替换内容。
+    setDocumentDirectory(parentDirectory(path));
+    restoreDocument(snapshot);
+    await activate(path, existing.dirty);
+    return true;
   }
   try {
     const markdown = await readText(path);
+    rememberCurrent();
     setDocumentDirectory(parentDirectory(path));
     loadMarkdown(markdown);
-    store.setFilePath(path);
-    store.setDirty(false);
-    store.setActiveNoteId(null);
-    store.setStatus("");
-    await loadNotes();
+    snapshots.delete(path);
+    if (!existing) {
+      store.openTab(path);
+    }
+    await activate(path, false);
     return true;
   } catch (error) {
     store.setStatus(errorText(error));
     return false;
   }
+}
+
+/** 关闭页签。有未保存修改时先切到该页签并询问是否保存。返回 false 表示未关闭。 */
+export async function closeTab(path: string): Promise<boolean> {
+  const tab = useAppStore.getState().tabs.find((item) => item.path === path);
+  if (!tab) {
+    return true;
+  }
+  if (tab.dirty) {
+    const shown = await openDocument(path);
+    if (!shown) {
+      return false;
+    }
+    const proceed = await confirmLeave();
+    if (!proceed) {
+      return false;
+    }
+  }
+  const store = useAppStore.getState();
+  const index = store.tabs.findIndex((item) => item.path === path);
+  const wasActive = store.filePath === path;
+  snapshots.delete(path);
+  store.removeTab(path);
+  if (!wasActive) {
+    return true;
+  }
+  const remaining = useAppStore.getState().tabs;
+  const neighbor = remaining[Math.min(index, remaining.length - 1)];
+  if (neighbor) {
+    // 当前页签已移除，不再保存它的现场；直接显示相邻页签。
+    store.setFilePath(null);
+    await openDocument(neighbor.path);
+    return true;
+  }
+  loadMarkdown("");
+  store.setFilePath(null);
+  store.setDirty(false);
+  store.setNotes([]);
+  store.setHeadings([]);
+  return true;
+}
+
+/** 按页签顺序切换到相邻页签，step 为 1 时向右、-1 时向左，首尾循环。 */
+export async function switchTab(step: number): Promise<void> {
+  const { tabs, filePath } = useAppStore.getState();
+  if (tabs.length < 2) {
+    return;
+  }
+  const index = tabs.findIndex((tab) => tab.path === filePath);
+  const next = tabs[(index + step + tabs.length) % tabs.length];
+  await openDocument(next.path);
 }
 
 /** 保存当前文档，返回是否成功。 */
