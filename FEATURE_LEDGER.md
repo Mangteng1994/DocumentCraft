@@ -55,7 +55,8 @@
 | DC-055 | 侧栏宽度拖动 | 左侧栏与右侧栏边缘可拖动调整宽度，有最小和最大宽度，双击恢复默认；宽度保存在设置中，重启后保留 | 已验收（模拟 IPC）· `editor/src/components/PaneResizer.tsx`、`settings/schema.ts` 的 `layout`、`tokens.ts` 的 `paneWidth` |
 | DC-056 | 状态栏工作区切换 | 状态栏左侧只显示当前工作区文件夹名，悬停显示完整路径；点击弹出最近打开的工作区列表，选择后切换，也可打开其他文件夹 | 已验收（模拟 IPC）· `editor/src/components/WorkspaceSwitcher.tsx` |
 | DC-057 | 全部折叠与全部展开 | 文件树头部和大纲头部各有「全部折叠」「全部展开」按钮，一键折叠或展开所有文件夹、所有带子标题的标题 | 已验收（模拟 IPC）· `editor/src/sidebar/FileTree.tsx`、`OutlineView.tsx` |
-| DC-058 | 搜索范围模式 | 搜索框左侧的范围按钮提供三种模式：「所有」（所有文件的文件名 + 纯文本文件正文，暂不含 Word、PDF、Excel 正文）、「所有文件名」（只匹配文件名，含非 Markdown 文件）、「所有纯文本正文」（只匹配纯文本文件内容）；模式保存在设置中；点击 Markdown 结果在编辑器打开，其他文件用系统默认应用打开（程序和脚本拒绝运行）；隐藏文件夹不搜，非 UTF-8 文本只按文件名匹配 | 已验收（模拟 IPC + Rust 测试）· `editor/src/sidebar/SearchView.tsx`、`settings/schema.ts` 的 `files.searchMode`、`src-tauri/src/workspace.rs` 的 `SearchMode` |
+| DC-058 | 搜索范围模式 | 搜索框左侧的范围按钮提供三种模式：「所有」（所有文件的文件名 + 正文，正文含纯文本和 DC-059 的 Word、Excel、PowerPoint、PDF）、「所有文件名」（只匹配文件名，含非 Markdown 文件）、「所有正文」（只匹配正文，含纯文本与 DC-059 的文档）；模式保存在设置中；点击 Markdown 结果在编辑器打开，其他文件用系统默认应用打开（程序和脚本拒绝运行）；隐藏文件夹不搜，非 UTF-8 文本只按文件名匹配 | 已验收（模拟 IPC + Rust 测试）· `editor/src/sidebar/SearchView.tsx`、`settings/schema.ts` 的 `files.searchMode`、`src-tauri/src/workspace.rs` 的 `SearchMode` |
+| DC-059 | Word、Excel、PowerPoint、PDF 正文搜索 | 侧栏搜索的「所有」「所有纯文本正文」两种模式同时检索 docx、xlsx、pptx、pdf 的正文：首次搜索后台解析并建立文本缓存（保存在应用数据目录，按文件修改时间与大小判断是否过期，增量更新，不写入工作区），索引期间显示进度、完成后自动刷新结果；结果显示所在页、段或行，点击用系统默认应用打开；加密、损坏和扫描件（无文字层）跳过并计数提示；旧版 doc、xls、ppt 暂不解析 | 已验收（Rust 测试 + 真实工作区 + 模拟 IPC）· `src-tauri/src/extract.rs`、`textindex.rs`、`workspace.rs` 的 `index_workspace`/`search_workspace`，`editor/src/sidebar/searchIndex.ts`、`SearchView.tsx` |
 
 ## Should
 
@@ -259,3 +260,11 @@ foreach ($step in 'save','reopen','style','full','skip','plain') {
 ## 2026-11-10 文件树头部固定
 
 - 文件树头部（文件夹名与新建、折叠、展开、刷新按钮）和新建输入框固定在侧栏顶部，只有文件列表滚动（`.dc-tree` 改为纵向 flex，`.dc-tree-root` 自身滚动）。模拟 IPC 在 260px 高的视口中验证：列表滚动 150px 后头部位置不变，侧栏容器本身不再滚动；滚动后新建输入框仍可见。未执行：原生窗口目视检查。
+
+## 2026-11-10 Word、Excel、PowerPoint、PDF 正文搜索
+
+- 做法：Rust 端解析文档（docx、xlsx、pptx 读 zip 内的 XML，pdf 用 pdf-extract），提取的文本按「文件修改时间 + 大小」缓存到应用数据目录 `search-cache`（不写入工作区），内存中保留一份索引供搜索；首次后台并行建立（最多 4 线程），之后增量更新；进度经 `search-index` 事件显示，索引期间搜索仍可用，结果按节流（3 秒）与完成时刷新。Word 的脚注、尾注、批注一并索引；PDF 中文跨行被切开的词在提取时重新连起；Office 的 `~$` 锁文件、超过 200 MB 的文件、加密或损坏的文件不索引，扫描件没有文字层，两者在结果上方提示数量。
+- Rust 测试：xml 实体与数字引用、docx 段落与批注、pptx 幻灯片按数字排序与换页、xlsx 共享字符串与内联文本与工作表名、损坏与不支持文件不 panic、PDF 中文换行重排、折叠大小写保持字节长度、索引增量更新（缓存命中、过期重解析、删除后清理缓存、锁文件与 txt 不入索引）、文档搜索定位到页、段、行且大小写不敏感、覆盖统计；共 20 项通过。
+- 真实工作区（只读）：446 个文档（docx、xlsx、pptx、pdf），首次建立索引 31 秒，重启后从缓存恢复 0.45 秒，无变化时更新 11 毫秒；内存中文本约 44 MB；搜索「流量」248 毫秒，53 个文件 500 处匹配，其中 49 个文件的命中来自文档，位置如「第 36 段」「第 3 页」；10 个文档解析失败（pdf-extract 在个别 PDF 上 panic，已捕获），24 个无文字层。
+- 模拟 IPC：索引进行中显示「正在建立…（1/2）」并只含已索引文档，完成后自动刷新出 PDF「第 2 页」、docx「第 2 段」；有未索引文档时补做一次增量索引且不重复触发；「所有文件名」不触发索引也不显示提示；点击文档结果用系统默认应用打开。tsc 通过。
+- 限制与未执行：不解析旧版 doc、xls、ppt 和 WPS 专有格式；不识别扫描件和图片中的文字（无 OCR）；没有对大工作区做长时间、低内存占用的压力测试；Copilot 工作区检索仍只读 Markdown，未接入此索引；原生窗口目视检查未执行。

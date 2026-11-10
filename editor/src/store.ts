@@ -4,7 +4,7 @@
  */
 
 import { create } from "zustand";
-import type { TreeNode } from "./backend";
+import type { IndexProgress, TreeNode } from "./backend";
 import type { Note } from "./editor/annotations";
 import type { HeadingItem } from "@vmark/utils/markdownOutline";
 
@@ -54,6 +54,10 @@ export interface AppState {
   searchQuery: string;
   /** 按快捷键打开搜索时递增，搜索框据此获得焦点。 */
   searchFocusRequest: number;
+  /** 当前工作区的文档索引进度；未开始建立时为 null。 */
+  indexProgress: IndexProgress | null;
+  /** 索引进度变化时按节流递增，搜索结果据此刷新。 */
+  indexVersion: number;
   /** 兼容 API 的 Key 只保存在本次会话内存中。 */
   apiKey: string;
   status: string;
@@ -78,6 +82,7 @@ export interface AppState {
   setSearchQuery: (query: string) => void;
   openSearch: () => void;
   closeSearch: () => void;
+  setIndexProgress: (progress: IndexProgress | null, refresh: boolean) => void;
   setApiKey: (key: string) => void;
   setStatus: (status: string) => void;
 }
@@ -100,10 +105,13 @@ export const useAppStore = create<AppState>((set) => ({
   searchOpen: false,
   searchQuery: "",
   searchFocusRequest: 0,
+  indexProgress: null,
+  indexVersion: 0,
   apiKey: "",
   status: "",
 
-  setWorkspace: (workspace, tree) => set({ workspace, tree }),
+  // 换工作区后旧的索引进度不再适用。
+  setWorkspace: (workspace, tree) => set((state) => ({ workspace, tree, indexProgress: workspace === state.workspace ? state.indexProgress : null })),
   setTree: (tree) => set({ tree }),
   setFilePath: (filePath) => set({ filePath }),
   // 未保存状态同时记在当前页签上，切换页签后据此恢复。
@@ -137,6 +145,8 @@ export const useAppStore = create<AppState>((set) => ({
   // 搜索的是整个工作区，结果替换目录树，所以打开搜索时切到「文件」视图。
   openSearch: () => set((state) => ({ searchOpen: true, sidebarView: "files", searchFocusRequest: state.searchFocusRequest + 1 })),
   closeSearch: () => set({ searchOpen: false, searchQuery: "" }),
+  setIndexProgress: (indexProgress, refresh) =>
+    set((state) => ({ indexProgress, indexVersion: refresh ? state.indexVersion + 1 : state.indexVersion })),
   setApiKey: (apiKey) => set({ apiKey }),
   setStatus: (status) => set({ status }),
 }));

@@ -1,8 +1,9 @@
 /**
  * 工作区搜索：Ctrl+F 在侧栏标签栏下方打开搜索框（SearchBar），搜索框左侧的范围按钮切换三种模式：
- * 所有（文件名 + 纯文本正文）、所有文件名、所有纯文本正文。有关键词时结果列表（SearchResults）替换目录树，
+ * 所有（文件名 + 正文）、所有文件名、所有正文。有关键词时结果列表（SearchResults）替换目录树，
  * 按文件分组。Markdown 结果在编辑器中打开并选中命中文字，其他文件交给系统默认应用。
- * 搜索由 Rust 端 `search_workspace` 完成；Word、PDF、Excel 的正文暂不搜索。
+ * 搜索由 Rust 端 `search_workspace` 完成；Word、Excel、PowerPoint、PDF 的正文来自后台建立的索引，
+ * 首次打开搜索时开始建立，进度显示在结果上方。
  */
 
 import { useEffect, useRef, useState } from "react";
@@ -13,6 +14,7 @@ import { parentDirectory, relativePath } from "../paths";
 import { SEARCH_MODES, type SearchMode } from "../settings/schema";
 import { useSettings } from "../settings/settingsStore";
 import { useAppStore } from "../store";
+import { startIndexing } from "./searchIndex";
 import { iconSize, iconStroke } from "../styles/tokens";
 
 /** 停止输入多久后发起搜索，避免每敲一个字就遍历一次工作区。 */
@@ -22,9 +24,9 @@ const MARKDOWN_NAME = /\.(md|markdown)$/i;
 
 /** 各搜索范围的名称、说明和输入框提示。 */
 const MODE_INFO: Record<SearchMode, { label: string; description: string; placeholder: string }> = {
-  all: { label: "所有", description: "文件名 + 纯文本正文（暂不含 Word、PDF、Excel 正文）", placeholder: "搜索文件名和纯文本正文" },
+  all: { label: "所有", description: "文件名 + 正文（含 Word、Excel、PowerPoint、PDF）", placeholder: "搜索文件名和正文" },
   names: { label: "所有文件名", description: "只匹配文件名，包含各种类型的文件", placeholder: "搜索文件名" },
-  text: { label: "所有纯文本正文", description: "只匹配 Markdown、txt、csv 等纯文本内容", placeholder: "搜索纯文本正文" },
+  text: { label: "所有正文", description: "只匹配正文：Markdown、txt 等纯文本，以及 Word、Excel、PowerPoint、PDF", placeholder: "搜索正文" },
 };
 
 function useSearchMode(): [SearchMode, (mode: SearchMode) => void] {
@@ -58,8 +60,16 @@ export function SearchBar() {
   const focusRequest = useAppStore((state) => state.searchFocusRequest);
   const inputRef = useRef<HTMLInputElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
+  const workspace = useAppStore((state) => state.workspace);
   const [mode, setMode] = useSearchMode();
   const [menuOpen, setMenuOpen] = useState(false);
+
+  // 搜索框打开时、或切换到含正文的范围时，确保文档索引已建立或更新（增量，已是最新则很快结束）。
+  useEffect(() => {
+    if (workspace && mode !== "names") {
+      void startIndexing(workspace);
+    }
+  }, [workspace, mode]);
 
   // 每次按 Ctrl+F 都聚焦并选中已有关键词，方便直接改写。
   useEffect(() => {
@@ -183,7 +193,7 @@ function SearchFileGroup({ file, root, query }: { file: SearchFile; root: string
           {file.matches.map((match) => (
             <li key={match.occurrence}>
               <button type="button" className="dc-search-match" onClick={() => openMatch(match.occurrence)}>
-                <span className="dc-search-line">{match.line}</span>
+                <span className="dc-search-line">{match.locator}</span>
                 <span className="dc-search-snippet">
                   {match.before}
                   <mark className="dc-search-hit">{match.hit}</mark>
@@ -204,6 +214,8 @@ export function SearchResults() {
   const workspace = useAppStore((state) => state.workspace);
   const query = useAppStore((state) => state.searchQuery);
   const [mode] = useSearchMode();
+  const indexVersion = useAppStore((state) => state.indexVersion);
+  const indexProgress = useAppStore((state) => state.indexProgress);
   const [result, setResult] = useState<SearchResult | null>(null);
   const [searching, setSearching] = useState(false);
   const [error, setError] = useState("");
@@ -243,17 +255,34 @@ export function SearchResults() {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [workspace, trimmed, mode]);
+  }, [workspace, trimmed, mode, indexVersion]);
+
+  // 搜索期间出现了新增或刚修改的文档（已索引数少于总数且后台没有在建立）时，补做一次增量索引。
+  // 同一个「总数:已索引数」状态只触发一次，避免文档始终无法索引时反复启动。
+  const autoStarted = useRef("");
+  useEffect(() => {
+    const docs = result?.docs;
+    if (!workspace || !docs || mode === "names" || docs.running || docs.indexed >= docs.total) {
+      return;
+    }
+    const key = `${workspace}:${docs.total}:${docs.indexed}`;
+    if (autoStarted.current === key) {
+      return;
+    }
+    autoStarted.current = key;
+    void startIndexing(workspace);
+  }, [workspace, mode, result]);
 
   if (!workspace) {
-    return <div className="dc-sidebar-empty">打开工作区后可以搜索其中的 Markdown 文档。</div>;
+    return <div className="dc-sidebar-empty">打开工作区后可以搜索其中的文档。</div>;
   }
 
   const fileCount = result?.files.length ?? 0;
   const matchCount = result ? countMatches(result) : 0;
 
   let summary = "";
-  if (searching) {
+  // 刷新索引进度触发的重新搜索期间保留旧结果和旧摘要，避免闪烁。
+  if (searching && !result) {
     summary = "正在搜索…";
   } else if (error) {
     summary = error;
@@ -266,6 +295,26 @@ export function SearchResults() {
     }
   }
 
+  // 文档正文索引的提示：建立中显示进度，建立后说明哪些文档搜不到正文。
+  const notes: string[] = [];
+  const docs = result?.docs;
+  if (docs && docs.total > 0 && mode !== "names") {
+    const running = docs.running || (indexProgress?.running ?? false);
+    if (running) {
+      const done = indexProgress ? indexProgress.done : docs.indexed;
+      const total = indexProgress ? indexProgress.total : docs.total;
+      notes.push(`正在建立 Word、Excel、PowerPoint、PDF 的正文索引（${done}/${total}），完成前结果可能不完整。`);
+    } else if (docs.indexed < docs.total) {
+      notes.push(`还有 ${docs.total - docs.indexed} 个文档未建立索引，正在准备。`);
+    }
+    if (docs.failed > 0) {
+      notes.push(`${docs.failed} 个文档无法解析（可能已加密或损坏），只能按文件名搜索。`);
+    }
+    if (docs.no_text > 0) {
+      notes.push(`${docs.no_text} 个文档没有文字层（多为扫描件），暂不支持识别图片中的文字。`);
+    }
+  }
+
   return (
     <div className="dc-search">
       {summary && (
@@ -273,6 +322,11 @@ export function SearchResults() {
           {summary}
         </div>
       )}
+      {notes.map((note) => (
+        <div key={note} className="dc-search-note">
+          {note}
+        </div>
+      ))}
       {result && fileCount > 0 && (
         <ul className="dc-search-results" aria-label="搜索结果">
           {result.files.map((file) => (

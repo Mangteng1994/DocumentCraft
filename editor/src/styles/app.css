@@ -2247,7 +2247,8 @@ textarea {
 
 .dc-search-line {
   flex-shrink: 0;
-  min-width: var(--dc-space-2xl);
+  min-width: var(--dc-size-locator);
+  white-space: nowrap;
   color: var(--dc-color-ink-faint);
   font-family: var(--dc-font-mono);
   font-size: var(--dc-font-size-xs);
@@ -2383,5 +2384,13 @@ body.is-resizing {
 .dc-search-mode-description {
   color: var(--dc-color-ink-faint);
   font-size: var(--dc-font-size-sm);
+  line-height: var(--dc-line-height-ui);
+}
+
+/* 文档索引提示（DC-059）：显示在搜索摘要下方，比摘要弱一档。 */
+.dc-search-note {
+  padding: 0 var(--dc-space-lg) var(--dc-space-sm);
+  color: var(--dc-color-ink-faint);
+  font-size: var(--dc-font-size-xs);
   line-height: var(--dc-line-height-ui);
 }

@@ -22,6 +22,7 @@ import { SettingsModal } from "./features/settings/SettingsModal";
 import { DocumentTabs } from "./components/DocumentTabs";
 import { PaneResizer, paneWidthStyle } from "./components/PaneResizer";
 import { RecentWorkspaces } from "./components/RecentWorkspaces";
+import { listenSearchIndex } from "./sidebar/searchIndex";
 import { WorkspaceSwitcher } from "./components/WorkspaceSwitcher";
 import { chooseFile, chooseWorkspace } from "./documentActions";
 import { fileName } from "./paths";
@@ -96,6 +97,9 @@ export function App() {
   useEffect(() => {
     void reloadCommands();
   }, [workspace, copilotFolder, reloadCommands]);
+
+  // 文档正文索引的进度来自后端事件，整个运行期间监听。
+  useEffect(() => listenSearchIndex(), []);
 
   // 关闭窗口前检查所有页签的未保存修改。
   useEffect(() => {
