@@ -25,7 +25,7 @@ export const ACTIONS = [
   { id: "closeTab", label: "关闭当前页签", scope: "global", defaultKey: "Ctrl+W" },
   { id: "nextTab", label: "下一个页签", scope: "global", defaultKey: "Ctrl+Tab" },
   { id: "previousTab", label: "上一个页签", scope: "global", defaultKey: "Ctrl+Shift+Tab" },
-  { id: "searchWorkspace", label: "在工作区中搜索", scope: "global", defaultKey: "Ctrl+Shift+F" },
+  { id: "searchWorkspace", label: "在工作区中搜索", scope: "global", defaultKey: "Ctrl+F" },
   { id: "openSettings", label: "打开设置", scope: "global", defaultKey: "Ctrl+," },
   { id: "toggleCopilot", label: "打开或关闭 Copilot", scope: "global", defaultKey: "Ctrl+Shift+L" },
   { id: "quickAsk", label: "Copilot：Quick Ask", scope: "global", defaultKey: "Ctrl+Shift+K" },
@@ -134,12 +134,19 @@ function normalizeRecentWorkspaces(saved: unknown): string[] {
   return result.slice(0, MAX_RECENT_WORKSPACES);
 }
 
+/** 0.2.4 的搜索默认快捷键。设置文件会整体保存快捷键，旧默认值需要迁移到 Ctrl+F。 */
+const LEGACY_SEARCH_HOTKEY = "Ctrl+Shift+F";
+
 export function normalizeSettings(saved: unknown): Settings {
   const root = isRecord(saved) ? saved : {};
+  const hotkeys = mergeSection(DEFAULT_SETTINGS.hotkeys, root.hotkeys);
+  if (hotkeys.searchWorkspace === LEGACY_SEARCH_HOTKEY) {
+    hotkeys.searchWorkspace = DEFAULT_SETTINGS.hotkeys.searchWorkspace;
+  }
   return {
     appearance: mergeSection(DEFAULT_SETTINGS.appearance, root.appearance),
     files: mergeSection(DEFAULT_SETTINGS.files, root.files),
-    hotkeys: mergeSection(DEFAULT_SETTINGS.hotkeys, root.hotkeys),
+    hotkeys,
     copilot: mergeSection(DEFAULT_SETTINGS.copilot, root.copilot),
     wordExport: mergeSection(DEFAULT_SETTINGS.wordExport, root.wordExport),
     figure: mergeSection(DEFAULT_SETTINGS.figure, root.figure),

@@ -8,7 +8,7 @@ import type { TreeNode } from "./backend";
 import type { Note } from "./editor/annotations";
 import type { HeadingItem } from "@vmark/utils/markdownOutline";
 
-export type SidebarView = "files" | "outline" | "search";
+export type SidebarView = "files" | "outline";
 export type RightPanel = "comments" | "copilot" | null;
 export type SettingsTab = "appearance" | "files" | "hotkeys" | "copilot" | "ai" | "word" | "figure";
 
@@ -48,7 +48,9 @@ export interface AppState {
   contextMenu: ContextMenuState | null;
   /** 右键「添加批注」时递增，批注面板据此为当前选区开始新建批注。 */
   commentRequest: number;
-  /** 搜索视图的关键词，切换侧栏视图后保留。 */
+  /** 侧栏顶部的搜索框是否打开（Ctrl+F）。 */
+  searchOpen: boolean;
+  /** 搜索关键词，搜索框关闭时清空。 */
   searchQuery: string;
   /** 按快捷键打开搜索时递增，搜索框据此获得焦点。 */
   searchFocusRequest: number;
@@ -75,6 +77,7 @@ export interface AppState {
   requestComment: () => void;
   setSearchQuery: (query: string) => void;
   openSearch: () => void;
+  closeSearch: () => void;
   setApiKey: (key: string) => void;
   setStatus: (status: string) => void;
 }
@@ -94,6 +97,7 @@ export const useAppStore = create<AppState>((set) => ({
   overlay: null,
   contextMenu: null,
   commentRequest: 0,
+  searchOpen: false,
   searchQuery: "",
   searchFocusRequest: 0,
   apiKey: "",
@@ -130,7 +134,9 @@ export const useAppStore = create<AppState>((set) => ({
   setContextMenu: (contextMenu) => set({ contextMenu }),
   requestComment: () => set((state) => ({ commentRequest: state.commentRequest + 1 })),
   setSearchQuery: (searchQuery) => set({ searchQuery }),
-  openSearch: () => set((state) => ({ sidebarView: "search", searchFocusRequest: state.searchFocusRequest + 1 })),
+  // 搜索的是整个工作区，结果替换目录树，所以打开搜索时切到「文件」视图。
+  openSearch: () => set((state) => ({ searchOpen: true, sidebarView: "files", searchFocusRequest: state.searchFocusRequest + 1 })),
+  closeSearch: () => set({ searchOpen: false, searchQuery: "" }),
   setApiKey: (apiKey) => set({ apiKey }),
   setStatus: (status) => set({ status }),
 }));

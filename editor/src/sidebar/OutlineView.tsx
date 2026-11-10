@@ -5,7 +5,7 @@
  */
 
 import { memo, useCallback, useDeferredValue, useMemo, useState } from "react";
-import { ChevronDown, ChevronRight, Search, X } from "lucide-react";
+import { ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, Search, X } from "lucide-react";
 import { buildHeadingTree, filterHeadingTree, type HeadingNode } from "@vmark/utils/markdownOutline";
 import { getEditor, revealPosition } from "../editor/editorHandle";
 import { useAppStore } from "../store";
@@ -26,7 +26,7 @@ const OutlineItem = memo(function OutlineItem({
   onToggle: (key: string) => void;
   onSelect: (node: HeadingNode) => void;
 }) {
-  const key = `${node.level}:${node.text}:${node.index}`;
+  const key = headingKey(node);
   const hasChildren = node.children.length > 0;
   const isCollapsed = !forceExpand && collapsed.has(key);
   const isActive = activeIndex === node.index;
@@ -88,6 +88,22 @@ const OutlineItem = memo(function OutlineItem({
   );
 });
 
+/** 标题节点的折叠键，与 OutlineItem 中的 key 保持一致。 */
+function headingKey(node: HeadingNode): string {
+  return `${node.level}:${node.text}:${node.index}`;
+}
+
+/** 收集所有带子标题的节点的折叠键，供「全部折叠」使用。 */
+function collectCollapsible(nodes: HeadingNode[], result: Set<string>): Set<string> {
+  for (const node of nodes) {
+    if (node.children.length > 0) {
+      result.add(headingKey(node));
+      collectCollapsible(node.children, result);
+    }
+  }
+  return result;
+}
+
 export function OutlineView() {
   const headings = useAppStore((state) => state.headings);
   const filePath = useAppStore((state) => state.filePath);
@@ -111,6 +127,9 @@ export function OutlineView() {
       return next;
     });
   }, []);
+
+  const collapseAll = () => setCollapsed(collectCollapsible(tree, new Set()));
+  const expandAll = () => setCollapsed(new Set());
 
   const handleSelect = useCallback((node: HeadingNode) => {
     setActiveIndex(node.index);
@@ -151,6 +170,12 @@ export function OutlineView() {
             <X size={iconSize.sm} />
           </button>
         )}
+        <button type="button" className="dc-icon-button" aria-label="全部折叠" title="全部折叠" onClick={collapseAll}>
+          <ChevronsDownUp size={iconSize.sm} />
+        </button>
+        <button type="button" className="dc-icon-button" aria-label="全部展开" title="全部展开" onClick={expandAll}>
+          <ChevronsUpDown size={iconSize.sm} />
+        </button>
       </div>
       {visibleTree.length > 0 ? (
         <ul className="dc-outline-tree" role="tree">

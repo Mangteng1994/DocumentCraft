@@ -1,10 +1,10 @@
 /**
  * 工作区文件树。行样式与交互参照 VMark FileExplorer/FileNode，去掉了右键菜单、
- * 重命名、拖放和文件监听，保留浏览、打开，以及在选中文件夹下新建 Markdown 和文件夹。
+ * 重命名、拖放和文件监听，保留浏览、打开、全部折叠与全部展开，以及在选中文件夹下新建 Markdown 和文件夹。
  */
 
 import { memo, useCallback, useState } from "react";
-import { ChevronDown, ChevronRight, File, FilePlus, FileText, Folder, FolderOpen, FolderPlus, RefreshCw } from "lucide-react";
+import { ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, File, FilePlus, FileText, Folder, FolderOpen, FolderPlus, RefreshCw } from "lucide-react";
 import type { TreeNode } from "../backend";
 import { chooseWorkspace, createFolderIn, createNote, openDocument, openWithSystem, refreshTree } from "../documentActions";
 import { relativePath } from "../paths";
@@ -14,6 +14,17 @@ import { iconSize, iconStroke } from "../styles/tokens";
 const MARKDOWN_NAME = /\.(md|markdown)$/i;
 
 type CreateKind = "note" | "folder";
+
+/** 收集树中所有文件夹的路径（不含根目录本身），供「全部展开」使用。 */
+function collectDirectories(node: TreeNode, result: Set<string>): Set<string> {
+  for (const child of node.children) {
+    if (child.is_dir) {
+      result.add(child.path);
+      collectDirectories(child, result);
+    }
+  }
+  return result;
+}
 
 interface RowProps {
   node: TreeNode;
@@ -124,6 +135,14 @@ export function FileTree() {
 
   const targetDir = selectedDir ?? tree?.path ?? "";
 
+  const collapseAll = () => setExpanded(new Set());
+
+  const expandAll = () => {
+    if (tree) {
+      setExpanded(collectDirectories(tree, new Set()));
+    }
+  };
+
   const startCreate = (kind: CreateKind) => {
     setCreating(kind);
     setDraftName("");
@@ -181,6 +200,12 @@ export function FileTree() {
           </button>
           <button type="button" className="dc-icon-button" aria-label="新建文件夹" title="新建文件夹" onClick={() => startCreate("folder")}>
             <FolderPlus size={iconSize.sm} />
+          </button>
+          <button type="button" className="dc-icon-button" aria-label="全部折叠" title="全部折叠" onClick={collapseAll}>
+            <ChevronsDownUp size={iconSize.sm} />
+          </button>
+          <button type="button" className="dc-icon-button" aria-label="全部展开" title="全部展开" onClick={expandAll}>
+            <ChevronsUpDown size={iconSize.sm} />
           </button>
           <button type="button" className="dc-icon-button" aria-label="刷新目录" title="刷新目录" onClick={() => void refreshTree()}>
             <RefreshCw size={iconSize.sm} />
