@@ -64,7 +64,7 @@
 
 | ID | 功能 | 验收条件 | 状态与实现 |
 | --- | --- | --- | --- |
-| DC-038 | 编辑器安装包 | Tauri 打包含 `docflow` sidecar 的 Windows 安装包 | 已实现 · 部分验收。`scripts/build-sidecar.ps1` → `out/sidecar/`，`npm run bundle` 生成 `DocumentCraft_0.2.0_x64-setup.exe`；release 版可启动，sidecar 在隔离 PATH 下对话与导出通过；安装包未实际安装 |
+| DC-038 | 编辑器安装包 | Tauri 打包含 `docflow` sidecar 的 Windows 安装包 | 已实现 · 部分验收。`scripts/build-sidecar.ps1` → `out/sidecar/`，`npm run bundle`（先由 `scripts/stage-runtime.ps1` 把 WebView2Loader.dll、libunwind.dll 放入 `out/runtime/` 并随安装包安装）生成 `DocumentCraft_0.2.0_x64-setup.exe`；release 版可启动，sidecar 在隔离 PATH 下对话与导出通过；安装包未实际安装 |
 | DC-008 | 旧版 DOC 与 WPS COM | 可通过 WPS 对 DOC 模板和输出进行兼容转换 | 后续文档引擎切片 |
 | DC-009 | 本地工作台与模板管理 | Vue 3 / Tauri 2 经 FastAPI 调用核心，SQLite 保存任务和模板元数据 | 后续产品切片 |
 | DC-019 | HTML 转 PPT | 可在导航中独立接入 HTML 转 PPT 工作流 | 后续切片 |
@@ -179,4 +179,10 @@ foreach ($step in 'save','reopen','style','full','skip','plain') {
 ## 2026-11-10 新目录下重新打包
 
 - `scripts/build-sidecar.ps1` 从 `core/` 打包到 `out/sidecar/DocumentCraft-cli.exe`。复制到 PATH 只含 System32 的临时目录运行：`chat` 对本地假 API 逐段输出并以 `done` 结束，文字为正确的 UTF-8；带批注的 `md-to-word` 写入 1 条批注并生成中文文件名的 DOCX。
-- `npm run bundle` 生成 77 MB 的安装包，NSIS 脚本从 `out/sidecar/` 取 sidecar 并安装到编辑器同目录。release 版直接启动，窗口正常响应。安装、卸载流程未在本机执行。
+- `npm run bundle`（先由 `scripts/stage-runtime.ps1` 把 WebView2Loader.dll、libunwind.dll 放入 `out/runtime/` 并随安装包安装）生成 77 MB 的安装包，NSIS 脚本从 `out/sidecar/` 取 sidecar 并安装到编辑器同目录。release 版直接启动，窗口正常响应。安装、卸载流程未在本机执行。
+
+## 2026-11-10 修复安装包缺少运行库
+
+- 现象：安装后启动报「找不到 WebView2Loader.dll」。原因：gnullvm 构建动态链接 WebView2Loader.dll 与 libunwind.dll，安装包未携带；开发机 PATH 里恰好有 libunwind 所以未暴露。
+- 修复：`scripts/stage-runtime.ps1` 暂存两个 DLL 到 `out/runtime/`，`tauri.bundle.conf.json` 作为资源安装到 exe 同目录，`npm run bundle` 自动先执行。
+- 验收：按安装布局复制到临时目录，PATH 仅含 System32 启动，进程正常运行；未实际运行安装程序。
