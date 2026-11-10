@@ -8,6 +8,7 @@ import { setDocumentDirectory } from "./editor/assets";
 import { currentMarkdown, getEditor, loadMarkdown, markClean } from "./editor/editorHandle";
 import { setAnnotationMeta, type Note, type NoteAnchor } from "./editor/annotations";
 import { fileName, parentDirectory } from "./paths";
+import { MAX_RECENT_WORKSPACES } from "./settings/schema";
 import { useSettings } from "./settings/settingsStore";
 import { useAppStore } from "./store";
 
@@ -83,12 +84,30 @@ export async function chooseWorkspace(): Promise<void> {
   await openWorkspace(selected);
 }
 
+/** 把工作区移到最近列表最前面。 */
+function rememberWorkspace(root: string): void {
+  const settings = useSettings.getState();
+  const previous = settings.settings.history.recentWorkspaces;
+  const others = previous.filter((item) => item.toLowerCase() !== root.toLowerCase());
+  const recentWorkspaces = [root, ...others].slice(0, MAX_RECENT_WORKSPACES);
+  settings.update("history", { recentWorkspaces });
+}
+
+/** 从最近列表中移除一个工作区，不影响磁盘上的文件夹。 */
+export function forgetWorkspace(root: string): void {
+  const settings = useSettings.getState();
+  const previous = settings.settings.history.recentWorkspaces;
+  const recentWorkspaces = previous.filter((item) => item.toLowerCase() !== root.toLowerCase());
+  settings.update("history", { recentWorkspaces });
+}
+
 export async function openWorkspace(root: string): Promise<void> {
   const store = useAppStore.getState();
   try {
     const tree = await listTree(root, showAllFiles());
     store.setWorkspace(root, tree);
     store.setSidebarView("files");
+    rememberWorkspace(root);
   } catch (error) {
     store.setStatus(errorText(error));
   }

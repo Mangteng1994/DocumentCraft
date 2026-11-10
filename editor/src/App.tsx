@@ -19,6 +19,7 @@ import { QuickAsk } from "./features/copilot/QuickAsk";
 import { useCopilot } from "./features/copilot/copilotStore";
 import { toggleCopilot } from "./features/copilot/actions";
 import { SettingsModal } from "./features/settings/SettingsModal";
+import { RecentWorkspaces } from "./components/RecentWorkspaces";
 import { chooseFile, chooseWorkspace } from "./documentActions";
 import { fileName } from "./paths";
 import { useSettings } from "./settings/settingsStore";
@@ -48,6 +49,7 @@ function WelcomeView() {
           打开 Markdown 文件
         </button>
       </div>
+      <RecentWorkspaces />
     </div>
   );
 }

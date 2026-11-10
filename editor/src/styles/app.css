@@ -1595,6 +1595,83 @@ textarea {
   color: var(--dc-color-ink-muted);
 }
 
+.dc-recent {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dc-space-xs);
+  width: 100%;
+  margin-top: var(--dc-space-lg);
+  text-align: left;
+}
+
+.dc-recent-title {
+  margin: 0 0 var(--dc-space-xs);
+  color: var(--dc-color-ink-muted);
+  font-size: var(--dc-font-size-sm);
+  font-weight: var(--dc-font-weight-bold);
+}
+
+.dc-recent-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.dc-recent-item {
+  display: flex;
+  align-items: center;
+  gap: var(--dc-space-xs);
+  border-radius: var(--dc-radius-sm);
+}
+
+.dc-recent-item:hover {
+  background: var(--dc-color-surface-hover);
+}
+
+.dc-recent-open {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: var(--dc-space-sm);
+  min-width: 0;
+  min-height: var(--dc-size-tree-row);
+  padding: 0 var(--dc-space-sm);
+  border: none;
+  background: transparent;
+  color: var(--dc-color-ink);
+  font-size: var(--dc-font-size-ui);
+  text-align: left;
+  cursor: pointer;
+}
+
+.dc-recent-name {
+  flex-shrink: 0;
+}
+
+.dc-recent-path {
+  overflow: hidden;
+  color: var(--dc-color-ink-faint);
+  font-size: var(--dc-font-size-sm);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.dc-recent-remove {
+  visibility: hidden;
+}
+
+.dc-recent-item:hover .dc-recent-remove,
+.dc-recent-remove:focus-visible {
+  visibility: visible;
+}
+
+.dc-outline-level {
+  flex-shrink: 0;
+  color: var(--dc-color-ink-faint);
+  font-family: var(--dc-font-mono);
+  font-size: var(--dc-font-size-xs);
+}
+
 .dc-welcome-actions {
   display: flex;
   flex-direction: column;
@@ -1647,11 +1724,45 @@ textarea {
   font-size: var(--dc-font-size-h3);
 }
 
-.dc-document h4,
-.dc-document h5,
-.dc-document h6 {
+.dc-document h4 {
   font-size: var(--dc-font-size-h4);
 }
+
+.dc-document h5 {
+  font-size: var(--dc-font-size-h5);
+}
+
+.dc-document h6 {
+  font-size: var(--dc-font-size-h6);
+  color: var(--dc-color-ink-muted);
+}
+
+/* 编辑区标题左侧标出级别（H1～H6），h4～h6 字号接近时也能分辨层级。只作用于编辑区，不影响 Copilot 消息。 */
+.dc-editor-host .dc-document :is(h1, h2, h3, h4, h5, h6) {
+  position: relative;
+}
+
+.dc-editor-host .dc-document :is(h1, h2, h3, h4, h5, h6)::before {
+  position: absolute;
+  right: 100%;
+  top: 50%;
+  margin-right: var(--dc-space-sm);
+  transform: translateY(-50%);
+  color: var(--dc-color-ink-faint);
+  font-family: var(--dc-font-mono);
+  font-size: var(--dc-font-size-xs);
+  font-weight: var(--dc-font-weight-regular);
+  line-height: var(--dc-line-height-tight);
+  pointer-events: none;
+  user-select: none;
+}
+
+.dc-editor-host .dc-document h1::before { content: "H1"; }
+.dc-editor-host .dc-document h2::before { content: "H2"; }
+.dc-editor-host .dc-document h3::before { content: "H3"; }
+.dc-editor-host .dc-document h4::before { content: "H4"; }
+.dc-editor-host .dc-document h5::before { content: "H5"; }
+.dc-editor-host .dc-document h6::before { content: "H6"; }
 
 .dc-document p {
   margin: var(--dc-space-md) 0;
