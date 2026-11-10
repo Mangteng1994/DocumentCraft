@@ -31,6 +31,8 @@ pub fn run() {
             workspace::read_text,
             workspace::write_text,
             workspace::create_dir,
+            workspace::create_markdown,
+            workspace::create_folder,
             workspace::remove_markdown,
             settings::load_settings,
             settings::save_settings,

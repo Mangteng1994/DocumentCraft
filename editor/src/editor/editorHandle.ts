@@ -20,6 +20,9 @@ let current: Editor | null = null;
 // 与 VMark 相同：管线只处理 LF 文本，保存时还原原文的换行符与硬换行写法。
 let documentLineEnding: LineEnding = "unknown";
 let documentOptions: MarkdownPipelineOptions = PIPELINE_OPTIONS;
+// 载入或保存时的序列化结果。编辑器在载入后可能自行规范文档（如空文件补一个空段落）并触发更新事件，
+// 与此基线比较可以避免只是打开文件就被标为「未保存」。
+let cleanMarkdown = "";
 
 export function setEditor(editor: Editor | null): void {
   current = editor;
@@ -49,6 +52,17 @@ export function loadMarkdown(markdown: string): void {
     plugins: editor.state.plugins,
   });
   editor.view.updateState(state);
+  markClean();
+}
+
+/** 把当前内容记为未修改的基线。载入文档和保存成功后调用。 */
+export function markClean(): void {
+  cleanMarkdown = currentMarkdown();
+}
+
+/** 当前内容与基线不同。 */
+export function differsFromClean(): boolean {
+  return currentMarkdown() !== cleanMarkdown;
 }
 
 export function currentMarkdown(): string {

@@ -251,6 +251,36 @@ textarea {
   text-overflow: ellipsis;
 }
 
+.dc-sidebar-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--dc-space-xs);
+}
+
+.dc-tree-create {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dc-space-xs);
+  padding: var(--dc-space-xs) var(--dc-space-md) var(--dc-space-sm) var(--dc-space-lg);
+}
+
+.dc-tree-create-hint {
+  overflow: hidden;
+  color: var(--dc-color-ink-muted);
+  font-size: var(--dc-font-size-sm);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.dc-tree-row.is-target {
+  color: var(--dc-color-ink);
+  font-weight: var(--dc-font-weight-bold);
+}
+
+.dc-tree-row.is-other {
+  opacity: var(--dc-opacity-disabled);
+}
+
 .dc-sidebar-empty {
   display: flex;
   flex-direction: column;
