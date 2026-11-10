@@ -49,11 +49,12 @@
 | DC-048 | 内置 Word 模板 | 「我的文档模板」随安装包内置，MD 转 Word 默认使用；「设置 → MD 转 Word」可更换为自定义 .docx，也可恢复内置模板 | 已实现 · `editor/resources/builtin-template.docx`、`src-tauri/src/lib.rs` 的 `builtin_template`、`WordExportSettings.tsx`；用内置模板经 docflow 导出成功（样式模式），界面与安装包未测试 |
 | DC-049 | 最近打开的文件夹 | 欢迎页列出最近打开的工作区（最多 10 个，最新在前），点击直接打开，× 只从列表移除；记录保存在编辑器设置中 | 已验收（模拟 IPC）· `editor/src/components/RecentWorkspaces.tsx`、`documentActions.ts`、`settings/schema.ts` 的 `history` |
 | DC-050 | 标题级别显示 | 编辑区每个标题左侧显示 H1～H6，大纲每行显示级别；h4～h6 字号区分，h6 用次要文字色 | 已验收（模拟 IPC）· `editor/src/styles/app.css`、`tokens.css`、`sidebar/OutlineView.tsx` |
-| DC-051 | 工作区文档搜索 | 侧栏「搜索」视图（Ctrl+Shift+F）在当前工作区所有 Markdown 中按文件名和正文搜索（不区分大小写），结果按文件分组，显示行号与带高亮的上下文；点击结果打开文档并选中对应文字；隐藏目录不搜索，结果数量有上限并提示 | 已验收（模拟 IPC + Rust 测试）· `editor/src/sidebar/SearchView.tsx`、`src-tauri/src/workspace.rs` 的 `search_workspace`、`editorHandle.ts` 的 `revealOccurrence` |
+| DC-051 | 工作区文档搜索 | `Ctrl+F` 在侧栏顶部（标签栏下方）出现搜索框，在当前工作区所有 Markdown 中按文件名和正文搜索（不区分大小写）；有关键词时结果替换目录树，按文件分组，显示行号与带高亮的上下文；点击结果打开文档并选中对应文字；Esc 或 × 关闭搜索并恢复目录树；侧栏只有「文件」「大纲」两个标签；隐藏目录不搜索，结果数量有上限并提示 | 已验收（模拟 IPC + Rust 测试）· `editor/src/sidebar/SearchView.tsx`（`SearchBar`、`SearchResults`）、`Sidebar.tsx`、`store.ts` 的 `searchOpen`；默认快捷键由 `Ctrl+Shift+F` 改为 `Ctrl+F`，设置读取时迁移旧默认值 |
 | DC-053 | 图片插入与显示 | `file:///` 与本地绝对路径的图片正常显示；找不到的图片显示「找不到图片」占位和原路径；粘贴截图或图片、右键「插入图片」时把图片保存到文档旁的 `assets/` 并以相对路径插入；粘贴内容中引用本地临时文件的图片在粘贴时复制到 `assets/`；不覆盖已有文件 | 已验收（模拟 IPC + Rust 测试）· `editor/src/editor/imageSupport.ts`、`assets.ts`、`src-tauri/src/images.rs`；不能找回已被清理的临时图片 |
 | DC-054 | 多文档页签 | 编辑区顶部为页签栏，打开文档时新增或切换页签；每个页签保留各自内容、撤销历史与未保存状态；页签可关闭（未保存时询问），Ctrl+W 关闭、Ctrl+Tab / Ctrl+Shift+Tab 切换；关闭窗口时检查所有页签 | 已验收（模拟 IPC）· `editor/src/components/DocumentTabs.tsx`、`documentActions.ts` 的页签现场、`editorHandle.ts` 的 `snapshotDocument`/`restoreDocument` |
 | DC-055 | 侧栏宽度拖动 | 左侧栏与右侧栏边缘可拖动调整宽度，有最小和最大宽度，双击恢复默认；宽度保存在设置中，重启后保留 | 已验收（模拟 IPC）· `editor/src/components/PaneResizer.tsx`、`settings/schema.ts` 的 `layout`、`tokens.ts` 的 `paneWidth` |
 | DC-056 | 状态栏工作区切换 | 状态栏左侧只显示当前工作区文件夹名，悬停显示完整路径；点击弹出最近打开的工作区列表，选择后切换，也可打开其他文件夹 | 已验收（模拟 IPC）· `editor/src/components/WorkspaceSwitcher.tsx` |
+| DC-057 | 全部折叠与全部展开 | 文件树头部和大纲头部各有「全部折叠」「全部展开」按钮，一键折叠或展开所有文件夹、所有带子标题的标题 | 已验收（模拟 IPC）· `editor/src/sidebar/FileTree.tsx`、`OutlineView.tsx` |
 
 ## Should
 
@@ -240,3 +241,9 @@ foreach ($step in 'save','reopen','style','full','skip','plain') {
 - 侧栏调宽（DC-055）：模拟拖动左侧栏 +100px 后宽度 360 并写入设置，拖过上限夹到 560，双击恢复 260；右侧栏向左拖 80px 后 440。
 - 工作区切换（DC-056）：状态栏左侧显示文件夹名，title 为完整路径；菜单列出最近工作区和「打开其他文件夹…」，选择后切换并关闭菜单。
 - tsc 通过，Rust 9 项测试通过。未执行：原生窗口内目视检查（窗口隐藏，截图未取得）、真实 WPS 剪贴板粘贴；从资源管理器拖放图片文件未实现。
+
+## 2026-11-10 侧栏搜索框与全部折叠、展开
+
+- 搜索（DC-051 调整）：去掉「搜索」标签，`Ctrl+F` 在标签栏下方出现搜索框并聚焦；输入关键词后结果替换目录树，Esc 或 × 关闭并恢复目录树；在大纲视图按 `Ctrl+F` 会切回文件视图。模拟 IPC：「流量」命中 2 个文档 5 处，点击「重复句」的第 2 条后选中第二段中的文字，结果列表保持显示。设置里保存的旧默认 `Ctrl+Shift+F` 读取时迁移为 `Ctrl+F`；若有人刻意把搜索绑成 `Ctrl+Shift+F`，也会被迁移，需重新录制。
+- 全部折叠、全部展开（DC-057）：文件树头部和大纲头部各两个按钮。模拟 IPC：展开后列出所有层级的文件夹与文件，折叠后只剩顶层；大纲折叠后只剩 H1，展开后恢复 4 行；头部在默认宽度下不溢出。tsc 通过。
+- 未执行：原生窗口内目视检查（窗口隐藏，截图未取得）。

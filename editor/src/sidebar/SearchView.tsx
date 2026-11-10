@@ -1,6 +1,7 @@
 /**
- * 工作区搜索：在当前工作区的所有 Markdown 中按文件名和正文搜索，结果按文件分组。
- * 点击文件名打开文档，点击匹配行打开文档并选中对应文字。搜索由 Rust 端 `search_workspace` 完成。
+ * 工作区搜索：Ctrl+F 在侧栏标签栏下方打开搜索框（SearchBar），在当前工作区的所有 Markdown 中按文件名和正文
+ * 搜索；有关键词时结果列表（SearchResults）替换目录树，按文件分组。点击文件名打开文档，点击匹配行打开文档并
+ * 选中对应文字。搜索由 Rust 端 `search_workspace` 完成。
  */
 
 import { useEffect, useRef, useState } from "react";
@@ -20,6 +21,47 @@ function countMatches(result: SearchResult): number {
     total += file.matches.length;
   }
   return total;
+}
+
+/** 标签栏下方的搜索框。Esc 或 × 关闭搜索并恢复目录树。 */
+export function SearchBar() {
+  const query = useAppStore((state) => state.searchQuery);
+  const setQuery = useAppStore((state) => state.setSearchQuery);
+  const closeSearch = useAppStore((state) => state.closeSearch);
+  const focusRequest = useAppStore((state) => state.searchFocusRequest);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // 每次按 Ctrl+F 都聚焦并选中已有关键词，方便直接改写。
+  useEffect(() => {
+    inputRef.current?.focus();
+    inputRef.current?.select();
+  }, [focusRequest]);
+
+  return (
+    <div className="dc-search-bar">
+      <div className="dc-outline-filter">
+        <Search size={iconSize.sm} className="dc-outline-filter-icon" aria-hidden="true" />
+        <input
+          ref={inputRef}
+          type="text"
+          className="dc-input dc-input-bare"
+          placeholder="在工作区中搜索文件名和正文"
+          aria-label="在工作区中搜索"
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Escape") {
+              event.stopPropagation();
+              closeSearch();
+            }
+          }}
+        />
+        <button type="button" className="dc-icon-button" aria-label="关闭搜索" title="关闭搜索（Esc）" onClick={closeSearch}>
+          <X size={iconSize.sm} />
+        </button>
+      </div>
+    </div>
+  );
 }
 
 function SearchFileGroup({ file, root, query }: { file: SearchFile; root: string; query: string }) {
@@ -57,30 +99,23 @@ function SearchFileGroup({ file, root, query }: { file: SearchFile; root: string
   );
 }
 
-export function SearchView() {
+/** 搜索结果列表。仅在搜索框打开且有关键词时渲染，替换目录树。 */
+export function SearchResults() {
   const workspace = useAppStore((state) => state.workspace);
   const query = useAppStore((state) => state.searchQuery);
-  const setQuery = useAppStore((state) => state.setSearchQuery);
-  const focusRequest = useAppStore((state) => state.searchFocusRequest);
-  const inputRef = useRef<HTMLInputElement>(null);
   const [result, setResult] = useState<SearchResult | null>(null);
   const [searching, setSearching] = useState(false);
   const [error, setError] = useState("");
+  const trimmed = query.trim();
 
   useEffect(() => {
-    inputRef.current?.focus();
-    inputRef.current?.select();
-  }, [focusRequest]);
-
-  useEffect(() => {
-    const trimmed = query.trim();
     if (!workspace || !trimmed) {
       setResult(null);
       setError("");
       setSearching(false);
       return;
     }
-    // 关键词变化或视图卸载后，旧请求的结果直接丢弃。
+    // 关键词变化或列表卸载后，旧请求的结果直接丢弃。
     let cancelled = false;
     setSearching(true);
     const timer = window.setTimeout(async () => {
@@ -107,13 +142,12 @@ export function SearchView() {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [workspace, query]);
+  }, [workspace, trimmed]);
 
   if (!workspace) {
     return <div className="dc-sidebar-empty">打开工作区后可以搜索其中的 Markdown 文档。</div>;
   }
 
-  const trimmed = query.trim();
   const fileCount = result?.files.length ?? 0;
   const matchCount = result ? countMatches(result) : 0;
 
@@ -133,29 +167,7 @@ export function SearchView() {
 
   return (
     <div className="dc-search">
-      <div className="dc-outline-filter">
-        <Search size={iconSize.sm} className="dc-outline-filter-icon" aria-hidden="true" />
-        <input
-          ref={inputRef}
-          type="text"
-          className="dc-input dc-input-bare"
-          placeholder="搜索文件名和正文"
-          aria-label="在工作区中搜索"
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Escape") {
-              setQuery("");
-            }
-          }}
-        />
-        {query && (
-          <button type="button" className="dc-icon-button" aria-label="清除搜索" title="清除搜索" onClick={() => setQuery("")}>
-            <X size={iconSize.sm} />
-          </button>
-        )}
-      </div>
-      {trimmed && summary && (
+      {summary && (
         <div className="dc-search-summary" role="status">
           {summary}
         </div>
