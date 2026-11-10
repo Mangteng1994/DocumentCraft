@@ -46,6 +46,7 @@
 | DC-045 | Copilot 命令与 Quick Ask | 命令以 Markdown 保存在 copilot-custom-prompts/，格式与 Obsidian Copilot 相同，可生成默认命令；右键或快捷键打开 Quick Ask，结果可复制、插入、替换选区或追问 | 已验收（模拟 IPC） · `editor/src/features/copilot/` |
 | DC-046 | 显示所有文件 | 「设置 → 文件」可开启显示所有文件：目录树列出工作区内全部文件和空文件夹（隐藏目录仍不显示），非 Markdown 文件置灰、点击只提示不能打开；默认关闭，保持只显示 Markdown | 已验收（模拟 IPC）· `editor/src/features/settings/FilesSettings.tsx`、`src-tauri/src/workspace.rs` 的 `list_tree(show_all)`；Rust 测试覆盖 |
 | DC-047 | 目录树新建 Markdown 与文件夹 | 文件栏头部有「新建 Markdown」「新建文件夹」按钮，在最近点击的文件夹（默认工作区根目录）下输入名称创建；Markdown 缺扩展名时补 .md 并打开；同名、含非法字符的名称被拒绝且不覆盖；默认视图中完全空的文件夹也保留 | 已验收（模拟 IPC）· `editor/src/sidebar/FileTree.tsx`、`documentActions.ts`、`workspace.rs` 的 `create_markdown`/`create_folder`；Rust 测试覆盖 |
+| DC-048 | 内置 Word 模板 | 「我的文档模板」随安装包内置，MD 转 Word 默认使用；「设置 → MD 转 Word」可更换为自定义 .docx，也可恢复内置模板 | 已实现 · `editor/resources/builtin-template.docx`、`src-tauri/src/lib.rs` 的 `builtin_template`、`WordExportSettings.tsx`；用内置模板经 docflow 导出成功（样式模式），界面与安装包未测试 |
 
 ## Should
 
@@ -200,3 +201,8 @@ foreach ($step in 'save','reopen','style','full','skip','plain') {
 ## 2026-11-10 版本 0.2.1
 
 - 编辑器版本升为 0.2.1：包含运行库修复、显示所有文件与目录树新建按钮。安装包 `DocumentCraft_0.2.1_x64-setup.exe`，未实际运行安装程序。
+
+## 2026-11-10 内置 Word 模板
+
+- 模板来自用户提供的「我的文档模板.docx」，无 {{DOCFLOW_CONTENT}} 锚点，自动识别为样式模式。
+- `docflow md-to-word` 使用该模板导出含标题、正文、表格的样例，生成成功；tsc 与 cargo check 通过。未在界面或安装包中验证。

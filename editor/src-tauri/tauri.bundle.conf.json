@@ -3,6 +3,7 @@
   "bundle": {
     "resources": {
       "../../out/sidecar/DocumentCraft-cli.exe": "DocumentCraft-cli.exe",
+      "../resources/builtin-template.docx": "builtin-template.docx",
       "../../out/runtime/WebView2Loader.dll": "WebView2Loader.dll",
       "../../out/runtime/libunwind.dll": "libunwind.dll"
     }

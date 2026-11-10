@@ -5,9 +5,9 @@
  * 只有用户在系统保存对话框中确认替换后才传 --overwrite。
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { open, save } from "@tauri-apps/plugin-dialog";
-import { docflow, errorText, openPath } from "../../backend";
+import { builtinTemplate, docflow, errorText, openPath } from "../../backend";
 import { ensureSaved } from "../../documentActions";
 import { fileName } from "../../paths";
 import type { TemplateMode } from "../../settings/schema";
@@ -43,6 +43,16 @@ export function WordExportSettings() {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
 
+  // 未选择自定义模板时使用内置模板。
+  const [builtinPath, setBuiltinPath] = useState("");
+  useEffect(() => {
+    builtinTemplate()
+      .then(setBuiltinPath)
+      .catch(() => setBuiltinPath(""));
+  }, []);
+  const customTemplate = wordExport.template;
+  const effectiveTemplate = customTemplate || builtinPath;
+
   const chooseTemplate = async () => {
     const selected = await open({ multiple: false, title: "选择 Word 模板", filters: [{ name: "Word 文档", extensions: ["docx"] }] });
     if (typeof selected === "string") {
@@ -72,7 +82,7 @@ export function WordExportSettings() {
         setMessage("文档未能保存，已取消导出。");
         return;
       }
-      const args = ["md-to-word", "--input", filePath, "--template", wordExport.template, "--output", output, "--template-mode", wordExport.mode, "--json"];
+      const args = ["md-to-word", "--input", filePath, "--template", effectiveTemplate, "--output", output, "--template-mode", wordExport.mode, "--json"];
       if (overwrite) {
         args.push("--overwrite");
       }
@@ -96,15 +106,23 @@ export function WordExportSettings() {
     }
   };
 
-  const ready = Boolean(filePath && wordExport.template && output);
+  const ready = Boolean(filePath && effectiveTemplate && output);
 
   return (
     <>
       <SettingHeading>默认参数</SettingHeading>
-      <SettingItem name="Word 模板" description={wordExport.template || "尚未选择 .docx 模板"}>
+      <SettingItem
+        name="Word 模板"
+        description={customTemplate ? `自定义：${customTemplate}` : builtinPath ? "内置：我的文档模板" : "找不到内置模板，请选择 .docx 模板"}
+      >
         <button type="button" className="dc-button" onClick={() => void chooseTemplate()}>
-          选择模板
+          更换模板
         </button>
+        {customTemplate && (
+          <button type="button" className="dc-button" onClick={() => update("wordExport", { template: "" })}>
+            恢复内置模板
+          </button>
+        )}
       </SettingItem>
       <SettingItem name="模板模式" description="完整模板在 {{DOCFLOW_CONTENT}} 或书签 DOCFLOW_CONTENT 处插入正文。">
         <select className="dc-input" value={wordExport.mode} onChange={(event) => update("wordExport", { mode: event.target.value as TemplateMode })}>

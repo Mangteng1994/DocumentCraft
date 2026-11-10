@@ -34,6 +34,11 @@ export function writeText(path: string, content: string): Promise<void> {
   return invoke<void>("write_text", { path, content });
 }
 
+/** 内置 Word 模板（我的文档模板）的路径。 */
+export function builtinTemplate(): Promise<string> {
+  return invoke<string>("builtin_template");
+}
+
 export function openPath(path: string): Promise<void> {
   return invoke<void>("open_path", { path });
 }
