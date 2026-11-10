@@ -6,7 +6,7 @@
 import { memo, useCallback, useState } from "react";
 import { ChevronDown, ChevronRight, File, FilePlus, FileText, Folder, FolderOpen, FolderPlus, RefreshCw } from "lucide-react";
 import type { TreeNode } from "../backend";
-import { chooseWorkspace, createFolderIn, createNote, openDocument, refreshTree } from "../documentActions";
+import { chooseWorkspace, createFolderIn, createNote, openDocument, openWithSystem, refreshTree } from "../documentActions";
 import { relativePath } from "../paths";
 import { useAppStore } from "../store";
 import { iconSize, iconStroke } from "../styles/tokens";
@@ -29,7 +29,7 @@ const TreeRow = memo(function TreeRow({ node, depth, activePath, expanded, selec
   const isOpen = expanded.has(node.path);
   const isActive = node.path === activePath;
   const isTarget = node.is_dir && node.path === selectedDir;
-  // 开启「显示所有文件」后出现的非 Markdown 文件：只显示，不能打开。
+  // 开启「显示所有文件」后出现的非 Markdown 文件：置灰，点击用系统默认应用打开。
   const isOther = !node.is_dir && !MARKDOWN_NAME.test(node.name);
   const indent = { "--dc-tree-depth": depth } as React.CSSProperties;
   const className = ["dc-tree-row", isActive ? "is-active" : "", isTarget ? "is-target" : "", isOther ? "is-other" : ""]
@@ -43,7 +43,7 @@ const TreeRow = memo(function TreeRow({ node, depth, activePath, expanded, selec
       return;
     }
     if (isOther) {
-      useAppStore.getState().setStatus(`${node.name} 不是 Markdown 文件，不能在编辑器中打开。`);
+      void openWithSystem(node.path, node.name);
       return;
     }
     void openDocument(node.path);

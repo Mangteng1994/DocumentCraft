@@ -35,6 +35,8 @@
   --dc-color-success: #08b94e;
   --dc-color-annotation: rgba(255, 208, 0, 0.4);   /* --text-highlight-bg */
   --dc-color-annotation-active: rgba(255, 166, 0, 0.6);
+  /* 搜索结果中的命中文字，跟随强调色的浅底，在两种主题中自动适配。 */
+  --dc-color-search-hit: var(--dc-color-accent-soft);
   --dc-color-code-surface: #fafafa;
   --dc-color-overlay: rgba(0, 0, 0, 0.4);
   --dc-color-alert-note: #086ddd;

@@ -26,6 +26,32 @@ export function createFolder(directory: string, name: string): Promise<string> {
   return invoke<string>("create_folder", { directory, name });
 }
 
+export interface SearchMatch {
+  line: number;
+  occurrence: number;
+  before: string;
+  hit: string;
+  after: string;
+}
+
+export interface SearchFile {
+  path: string;
+  name: string;
+  name_match: boolean;
+  matches: SearchMatch[];
+  more: boolean;
+}
+
+export interface SearchResult {
+  files: SearchFile[];
+  truncated: boolean;
+}
+
+/** 在工作区所有 Markdown 中按文件名和正文搜索，不区分大小写。 */
+export function searchWorkspace(root: string, query: string): Promise<SearchResult> {
+  return invoke<SearchResult>("search_workspace", { root, query });
+}
+
 export function readText(path: string): Promise<string> {
   return invoke<string>("read_text", { path });
 }

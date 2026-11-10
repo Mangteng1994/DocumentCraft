@@ -4,14 +4,14 @@
 
 | 目录 | 内容 |
 | --- | --- |
-| `editor/` | 阅读编辑器。Tauri 2 + React + TipTap，编辑核心移植自 [VMark](https://github.com/xiaolai/vmark)（ISC，见 `editor/src/vendor/vmark/README.md`），侧栏只保留文件树和文档大纲 |
+| `editor/` | 阅读编辑器。Tauri 2 + React + TipTap，编辑核心移植自 [VMark](https://github.com/xiaolai/vmark)（ISC，见 `editor/src/vendor/vmark/README.md`），侧栏为文件树、文档大纲和工作区搜索 |
 | `core/` | Python 核心与 `docflow` CLI：Markdown → DOCX 转换、批注存储与导出、科研配图、Copilot 对话与工作区检索、AI 连接。编辑器以 sidecar 方式调用 |
 | `scripts/` | 构建脚本 |
 | `out/`、`local/` | 构建产物与本机私有资料，不入库 |
 
 ## 阅读编辑器
 
-左侧 Ribbon 依次为打开文件夹、打开文件、Copilot、批注，底部为设置。左侧栏「文件」列出工作区内的 Markdown 目录树（隐藏目录与链接不显示；「设置 → 文件」可改为显示所有文件），头部按钮可在选中的文件夹下新建 Markdown 和文件夹，「大纲」按标题层级列出当前文档，可过滤和折叠，点击跳到标题。正文为所见即所得编辑。Markdown 往返沿用 VMark 管线，保留原文空行、换行符、引用式链接、脚注、公式、提示块和前置元数据。工作区内的本地图片按文档所在目录解析。
+左侧 Ribbon 依次为打开文件夹、打开文件、Copilot、批注，底部为设置。左侧栏「文件」列出工作区内的 Markdown 目录树（隐藏目录与链接不显示；「设置 → 文件」可改为显示所有文件），头部按钮可在选中的文件夹下新建 Markdown 和文件夹；显示所有文件时，点击非 Markdown 文件用系统默认应用打开（程序和脚本除外）。「大纲」按标题层级列出当前文档，可过滤和折叠，点击跳到标题。「搜索」（`Ctrl+Shift+F`）在工作区所有 Markdown 中按文件名和正文搜索，点击结果打开文档并选中命中文字。正文为所见即所得编辑。Markdown 往返沿用 VMark 管线，保留原文空行、换行符、引用式链接、脚注、公式、提示块和前置元数据。工作区内的本地图片按文档所在目录解析。
 
 ### 快捷键与右键菜单
 
@@ -21,6 +21,7 @@
 | 正文段落 | `Ctrl+0` |
 | 插入表格 | `Ctrl+T` |
 | 保存 | `Ctrl+S` |
+| 在工作区中搜索 | `Ctrl+Shift+F` |
 | 打开设置 | `Ctrl+,` |
 | 打开或关闭 Copilot | `Ctrl+Shift+L` |
 | Copilot：Quick Ask | `Ctrl+Shift+K` |

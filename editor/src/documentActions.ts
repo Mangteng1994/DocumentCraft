@@ -3,9 +3,9 @@
  */
 
 import { ask, open } from "@tauri-apps/plugin-dialog";
-import { createFolder, createMarkdown, docflow, errorText, listTree, readText, writeText } from "./backend";
+import { createFolder, createMarkdown, docflow, errorText, listTree, openPath, readText, writeText } from "./backend";
 import { setDocumentDirectory } from "./editor/assets";
-import { currentMarkdown, getEditor, loadMarkdown, markClean } from "./editor/editorHandle";
+import { currentMarkdown, getEditor, loadMarkdown, markClean, revealOccurrence } from "./editor/editorHandle";
 import { setAnnotationMeta, type Note, type NoteAnchor } from "./editor/annotations";
 import { fileName, parentDirectory } from "./paths";
 import { MAX_RECENT_WORKSPACES } from "./settings/schema";
@@ -110,6 +110,29 @@ export async function openWorkspace(root: string): Promise<void> {
     rememberWorkspace(root);
   } catch (error) {
     store.setStatus(errorText(error));
+  }
+}
+
+/** 用系统默认应用打开非 Markdown 文件。程序和脚本由后端拒绝，原因显示在状态栏。 */
+export async function openWithSystem(path: string, name: string): Promise<void> {
+  const store = useAppStore.getState();
+  try {
+    await openPath(path);
+    store.setStatus(`已用默认应用打开 ${name}`);
+  } catch (error) {
+    store.setStatus(errorText(error));
+  }
+}
+
+/** 打开文档并选中第 occurrence 处（从 0 起）与 query 相同的文字，供搜索结果跳转。 */
+export async function openSearchResult(path: string, query: string, occurrence: number): Promise<void> {
+  const opened = await openDocument(path);
+  if (!opened) {
+    return;
+  }
+  const found = revealOccurrence(query, occurrence);
+  if (!found) {
+    useAppStore.getState().setStatus("已打开文档，但搜索文字在排版后的正文中找不到（可能位于链接地址或代码标记中）。");
   }
 }
 

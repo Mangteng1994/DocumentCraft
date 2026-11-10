@@ -141,6 +141,38 @@ export function revealText(probe: string): boolean {
   return true;
 }
 
+/**
+ * 按不区分大小写的方式，在正文文本块中找到第 occurrence 处（从 0 起）出现的 query 并选中。
+ * 搜索在 Markdown 源文中计数，排版后的正文少了标记符号，序号可能对不上；超出时退回第一处。
+ * 匹配在单个文本节点内进行，不跨文本块、格式边界（如半句加粗）和行内原子节点（公式、图片）。
+ */
+export function revealOccurrence(query: string, occurrence: number): boolean {
+  const editor = current;
+  const needle = query.toLowerCase();
+  if (!editor || !needle) {
+    return false;
+  }
+  const hits: { from: number; to: number }[] = [];
+  editor.state.doc.descendants((node, pos) => {
+    if (!node.isText || !node.text) {
+      return true;
+    }
+    const haystack = node.text.toLowerCase();
+    let index = haystack.indexOf(needle);
+    while (index !== -1) {
+      hits.push({ from: pos + index, to: pos + index + needle.length });
+      index = haystack.indexOf(needle, index + needle.length);
+    }
+    return false;
+  });
+  if (hits.length === 0) {
+    return false;
+  }
+  const hit = hits[occurrence] ?? hits[0];
+  revealPosition(hit.from, hit.to);
+  return true;
+}
+
 function markdownContent(markdown: string) {
   const editor = current;
   if (!editor) {

@@ -8,7 +8,7 @@ import type { TreeNode } from "./backend";
 import type { Note } from "./editor/annotations";
 import type { HeadingItem } from "@vmark/utils/markdownOutline";
 
-export type SidebarView = "files" | "outline";
+export type SidebarView = "files" | "outline" | "search";
 export type RightPanel = "comments" | "copilot" | null;
 export type SettingsTab = "appearance" | "files" | "hotkeys" | "copilot" | "ai" | "word" | "figure";
 
@@ -40,6 +40,10 @@ export interface AppState {
   contextMenu: ContextMenuState | null;
   /** 右键「添加批注」时递增，批注面板据此为当前选区开始新建批注。 */
   commentRequest: number;
+  /** 搜索视图的关键词，切换侧栏视图后保留。 */
+  searchQuery: string;
+  /** 按快捷键打开搜索时递增，搜索框据此获得焦点。 */
+  searchFocusRequest: number;
   /** 兼容 API 的 Key 只保存在本次会话内存中。 */
   apiKey: string;
   status: string;
@@ -58,6 +62,8 @@ export interface AppState {
   openSettings: (tab?: SettingsTab) => void;
   setContextMenu: (menu: ContextMenuState | null) => void;
   requestComment: () => void;
+  setSearchQuery: (query: string) => void;
+  openSearch: () => void;
   setApiKey: (key: string) => void;
   setStatus: (status: string) => void;
 }
@@ -76,6 +82,8 @@ export const useAppStore = create<AppState>((set) => ({
   overlay: null,
   contextMenu: null,
   commentRequest: 0,
+  searchQuery: "",
+  searchFocusRequest: 0,
   apiKey: "",
   status: "",
 
@@ -93,6 +101,8 @@ export const useAppStore = create<AppState>((set) => ({
   openSettings: (tab = "appearance") => set({ overlay: { kind: "settings", tab }, contextMenu: null }),
   setContextMenu: (contextMenu) => set({ contextMenu }),
   requestComment: () => set((state) => ({ commentRequest: state.commentRequest + 1 })),
+  setSearchQuery: (searchQuery) => set({ searchQuery }),
+  openSearch: () => set((state) => ({ sidebarView: "search", searchFocusRequest: state.searchFocusRequest + 1 })),
   setApiKey: (apiKey) => set({ apiKey }),
   setStatus: (status) => set({ status }),
 }));

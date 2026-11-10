@@ -1955,3 +1955,106 @@ textarea {
 .dc-annotation-active {
   background: var(--dc-color-annotation-active);
 }
+
+/* 工作区搜索（DC-051） */
+.dc-search-summary {
+  padding: 0 var(--dc-space-lg) var(--dc-space-sm);
+  color: var(--dc-color-ink-faint);
+  font-size: var(--dc-font-size-sm);
+}
+
+.dc-search-results,
+.dc-search-matches {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.dc-search-results {
+  padding: 0 var(--dc-space-sm) var(--dc-space-lg);
+}
+
+.dc-search-file-row,
+.dc-search-match {
+  display: flex;
+  align-items: center;
+  gap: var(--dc-space-xs);
+  width: 100%;
+  min-height: var(--dc-size-tree-row);
+  padding: 0 var(--dc-space-sm);
+  border: none;
+  border-radius: var(--dc-radius-sm);
+  background: transparent;
+  color: var(--dc-color-ink-muted);
+  font: inherit;
+  font-size: var(--dc-font-size-md);
+  text-align: left;
+  cursor: pointer;
+}
+
+.dc-search-file-row:hover,
+.dc-search-match:hover {
+  background: var(--dc-color-surface-hover);
+  color: var(--dc-color-ink);
+}
+
+.dc-search-file-row {
+  color: var(--dc-color-ink);
+}
+
+.dc-search-file-name {
+  flex-shrink: 0;
+  font-weight: var(--dc-font-weight-medium);
+}
+
+.dc-search-file-name.is-name-match {
+  background: var(--dc-color-search-hit);
+  border-radius: var(--dc-radius-sm);
+}
+
+.dc-search-file-folder {
+  overflow: hidden;
+  color: var(--dc-color-ink-faint);
+  font-size: var(--dc-font-size-sm);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.dc-search-count {
+  margin-left: auto;
+  flex-shrink: 0;
+  color: var(--dc-color-ink-faint);
+  font-size: var(--dc-font-size-xs);
+}
+
+.dc-search-match {
+  align-items: baseline;
+  padding-top: var(--dc-space-2xs);
+  padding-bottom: var(--dc-space-2xs);
+  padding-left: calc(var(--dc-space-sm) + var(--dc-indent-tree));
+  line-height: var(--dc-line-height-ui);
+}
+
+.dc-search-line {
+  flex-shrink: 0;
+  min-width: var(--dc-space-2xl);
+  color: var(--dc-color-ink-faint);
+  font-family: var(--dc-font-mono);
+  font-size: var(--dc-font-size-xs);
+}
+
+.dc-search-snippet {
+  overflow-wrap: anywhere;
+}
+
+.dc-search-hit {
+  border-radius: var(--dc-radius-sm);
+  background: var(--dc-color-search-hit);
+  color: var(--dc-color-ink);
+}
+
+.dc-search-more {
+  padding: var(--dc-space-2xs) var(--dc-space-sm) var(--dc-space-2xs) calc(var(--dc-space-sm) + var(--dc-indent-tree));
+  color: var(--dc-color-ink-faint);
+  font-size: var(--dc-font-size-sm);
+}

@@ -42,6 +42,7 @@ function runAction(action: ActionId): void {
     insertTable: () => store.setOverlay({ kind: "insertTable" }),
     save: () => void saveDocument(),
     openSettings: () => store.openSettings(),
+    searchWorkspace: () => store.openSearch(),
     toggleCopilot,
     quickAsk: openQuickAsk,
     addSelectionToChat,

@@ -22,6 +22,7 @@ export const ACTIONS = [
   { id: "paragraph", label: "正文段落", scope: "editor", defaultKey: "Ctrl+0" },
   { id: "insertTable", label: "插入表格", scope: "editor", defaultKey: "Ctrl+T" },
   { id: "save", label: "保存", scope: "global", defaultKey: "Ctrl+S" },
+  { id: "searchWorkspace", label: "在工作区中搜索", scope: "global", defaultKey: "Ctrl+Shift+F" },
   { id: "openSettings", label: "打开设置", scope: "global", defaultKey: "Ctrl+," },
   { id: "toggleCopilot", label: "打开或关闭 Copilot", scope: "global", defaultKey: "Ctrl+Shift+L" },
   { id: "quickAsk", label: "Copilot：Quick Ask", scope: "global", defaultKey: "Ctrl+Shift+K" },
