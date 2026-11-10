@@ -78,7 +78,7 @@ cd editor
 npm run bundle
 ```
 
-sidecar 输出到 `out/sidecar/`，安装包位于 `editor/src-tauri/target/release/bundle/nsis/`。目标机器需要 WebView2 Runtime，Windows 11 已自带。
+sidecar 输出到 `out/sidecar/`，运行库（WebView2Loader.dll、libunwind.dll）由 `npm run bundle` 暂存到 `out/runtime/`，安装包位于 `editor/src-tauri/target/release/bundle/nsis/`。目标机器需要 WebView2 Runtime，Windows 11 已自带。
 
 ### sidecar 接口
 
