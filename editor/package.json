@@ -1,7 +1,7 @@
 {
   "name": "documentcraft-editor",
   "private": true,
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "DocumentCraft 阅读编辑器（基于 VMark 编辑核心精简）",
   "type": "module",
   "scripts": {
@@ -9,7 +9,7 @@
     "build": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
     "tauri": "tauri",
-    "bundle": "powershell -NoProfile -ExecutionPolicy Bypass -File ../scripts/stage-runtime.ps1 && tauri build --config src-tauri/tauri.bundle.conf.json"
+    "bundle": "powershell -NoProfile -ExecutionPolicy Bypass -File ../scripts/bundle-editor.ps1"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.12.4",

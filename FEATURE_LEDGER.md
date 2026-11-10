@@ -67,7 +67,7 @@
 
 | ID | 功能 | 验收条件 | 状态与实现 |
 | --- | --- | --- | --- |
-| DC-038 | 编辑器安装包 | Tauri 打包含 `docflow` sidecar 的 Windows 安装包 | 已实现 · 部分验收。`scripts/build-sidecar.ps1` → `out/sidecar/`，`npm run bundle`（先由 `scripts/stage-runtime.ps1` 把 WebView2Loader.dll、libunwind.dll 放入 `out/runtime/` 并随安装包安装）生成 `DocumentCraft_0.2.1_x64-setup.exe`；release 版可启动，sidecar 在隔离 PATH 下对话与导出通过；安装包未实际安装 |
+| DC-038 | 编辑器安装包 | Tauri 打包含 `docflow` sidecar 的 Windows 安装包 | 已实现 · 部分验收。`scripts/build-sidecar.ps1` → `out/sidecar/`，`npm run bundle`（`scripts/bundle-editor.ps1`，MSVC 工具链）生成 `DocumentCraft_0.2.2_x64-setup.exe`；release 版可启动，sidecar 在隔离 PATH 下对话与导出通过；安装包未实际安装 |
 | DC-008 | 旧版 DOC 与 WPS COM | 可通过 WPS 对 DOC 模板和输出进行兼容转换 | 后续文档引擎切片 |
 | DC-009 | 本地工作台与模板管理 | Vue 3 / Tauri 2 经 FastAPI 调用核心，SQLite 保存任务和模板元数据 | 后续产品切片 |
 | DC-019 | HTML 转 PPT | 可在导航中独立接入 HTML 转 PPT 工作流 | 后续切片 |
@@ -206,3 +206,10 @@ foreach ($step in 'save','reopen','style','full','skip','plain') {
 
 - 模板来自用户提供的「我的文档模板.docx」，无 {{DOCFLOW_CONTENT}} 锚点，自动识别为样式模式。
 - `docflow md-to-word` 使用该模板导出含标题、正文、表格的样例，生成成功；tsc 与 cargo check 通过。未在界面或安装包中验证。
+
+## 2026-11-10 改用 MSVC 工具链打包（0.2.2）
+
+- 现象：gnullvm 构建的编辑器 exe 被火绒判为恶意文件并隔离（编译产物与安装位置都会触发），打包时还出现「文件被占用」。
+- 处理：`scripts/bundle-editor.ps1` 固定用 rustup 的 `stable-x86_64-pc-windows-msvc` 编译并打包。WebView2 加载器静态链接，安装包不再携带 WebView2Loader.dll、libunwind.dll，删除 `scripts/stage-runtime.ps1`。
+- 验收：0.2.2 安装包与编辑器 exe 复制到未加信任的 `%LOCALAPPDATA%\Temp` 子目录，PATH 只含 System32 启动，进程正常运行，文件未被隔离；同一位置的 gnullvm 构建此前在运行时被隔离。安装程序未实际运行；未做代码签名，其他杀毒软件和 SmartScreen 仍可能提示。
+
