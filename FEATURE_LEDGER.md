@@ -66,7 +66,7 @@
 
 | ID | 功能 | 验收条件 | 状态与实现 |
 | --- | --- | --- | --- |
-| DC-038 | 编辑器安装包 | Tauri 打包含 `docflow` sidecar 的 Windows 安装包 | 已实现 · 部分验收。`scripts/build-sidecar.ps1` → `out/sidecar/`，`npm run bundle`（先由 `scripts/stage-runtime.ps1` 把 WebView2Loader.dll、libunwind.dll 放入 `out/runtime/` 并随安装包安装）生成 `DocumentCraft_0.2.0_x64-setup.exe`；release 版可启动，sidecar 在隔离 PATH 下对话与导出通过；安装包未实际安装 |
+| DC-038 | 编辑器安装包 | Tauri 打包含 `docflow` sidecar 的 Windows 安装包 | 已实现 · 部分验收。`scripts/build-sidecar.ps1` → `out/sidecar/`，`npm run bundle`（先由 `scripts/stage-runtime.ps1` 把 WebView2Loader.dll、libunwind.dll 放入 `out/runtime/` 并随安装包安装）生成 `DocumentCraft_0.2.1_x64-setup.exe`；release 版可启动，sidecar 在隔离 PATH 下对话与导出通过；安装包未实际安装 |
 | DC-008 | 旧版 DOC 与 WPS COM | 可通过 WPS 对 DOC 模板和输出进行兼容转换 | 后续文档引擎切片 |
 | DC-009 | 本地工作台与模板管理 | Vue 3 / Tauri 2 经 FastAPI 调用核心，SQLite 保存任务和模板元数据 | 后续产品切片 |
 | DC-019 | HTML 转 PPT | 可在导航中独立接入 HTML 转 PPT 工作流 | 后续切片 |
@@ -196,3 +196,7 @@ foreach ($step in 'save','reopen','style','full','skip','plain') {
 - 顺带修复：打开空的 Markdown 会被标为「未保存」（编辑器载入后自行规范文档触发更新），现与载入基线比较，只有内容真的变化才标记。
 - 未执行：原生窗口内点击；新安装包尚未重新打包。
 
+
+## 2026-11-10 版本 0.2.1
+
+- 编辑器版本升为 0.2.1：包含运行库修复、显示所有文件与目录树新建按钮。安装包 `DocumentCraft_0.2.1_x64-setup.exe`，未实际运行安装程序。
