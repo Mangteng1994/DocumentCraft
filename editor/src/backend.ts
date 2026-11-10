@@ -47,9 +47,9 @@ export interface SearchResult {
   truncated: boolean;
 }
 
-/** 在工作区所有 Markdown 中按文件名和正文搜索，不区分大小写。 */
-export function searchWorkspace(root: string, query: string): Promise<SearchResult> {
-  return invoke<SearchResult>("search_workspace", { root, query });
+/** 在工作区中搜索，不区分大小写。mode 见 settings/schema 的 SEARCH_MODES。 */
+export function searchWorkspace(root: string, query: string, mode: string): Promise<SearchResult> {
+  return invoke<SearchResult>("search_workspace", { root, query, mode });
 }
 
 /** 把粘贴的图片数据保存到文档旁的 assets/，返回相对于文档目录的路径。 */
