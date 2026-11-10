@@ -47,6 +47,8 @@
 | DC-046 | 显示所有文件 | 「设置 → 文件」可开启显示所有文件：目录树列出工作区内全部文件和空文件夹（隐藏目录仍不显示），非 Markdown 文件置灰、点击只提示不能打开；默认关闭，保持只显示 Markdown | 已验收（模拟 IPC）· `editor/src/features/settings/FilesSettings.tsx`、`src-tauri/src/workspace.rs` 的 `list_tree(show_all)`；Rust 测试覆盖 |
 | DC-047 | 目录树新建 Markdown 与文件夹 | 文件栏头部有「新建 Markdown」「新建文件夹」按钮，在最近点击的文件夹（默认工作区根目录）下输入名称创建；Markdown 缺扩展名时补 .md 并打开；同名、含非法字符的名称被拒绝且不覆盖；默认视图中完全空的文件夹也保留 | 已验收（模拟 IPC）· `editor/src/sidebar/FileTree.tsx`、`documentActions.ts`、`workspace.rs` 的 `create_markdown`/`create_folder`；Rust 测试覆盖 |
 | DC-048 | 内置 Word 模板 | 「我的文档模板」随安装包内置，MD 转 Word 默认使用；「设置 → MD 转 Word」可更换为自定义 .docx，也可恢复内置模板 | 已实现 · `editor/resources/builtin-template.docx`、`src-tauri/src/lib.rs` 的 `builtin_template`、`WordExportSettings.tsx`；用内置模板经 docflow 导出成功（样式模式），界面与安装包未测试 |
+| DC-049 | 最近打开的文件夹 | 欢迎页列出最近打开的工作区（最多 10 个，最新在前），点击直接打开，× 只从列表移除；记录保存在编辑器设置中 | 已验收（模拟 IPC）· `editor/src/components/RecentWorkspaces.tsx`、`documentActions.ts`、`settings/schema.ts` 的 `history` |
+| DC-050 | 标题级别显示 | 编辑区每个标题左侧显示 H1～H6，大纲每行显示级别；h4～h6 字号区分，h6 用次要文字色 | 已验收（模拟 IPC）· `editor/src/styles/app.css`、`tokens.css`、`sidebar/OutlineView.tsx` |
 
 ## Should
 
@@ -212,4 +214,9 @@ foreach ($step in 'save','reopen','style','full','skip','plain') {
 - 现象：gnullvm 构建的编辑器 exe 被火绒判为恶意文件并隔离（编译产物与安装位置都会触发），打包时还出现「文件被占用」。
 - 处理：`scripts/bundle-editor.ps1` 固定用 rustup 的 `stable-x86_64-pc-windows-msvc` 编译并打包。WebView2 加载器静态链接，安装包不再携带 WebView2Loader.dll、libunwind.dll，删除 `scripts/stage-runtime.ps1`。
 - 验收：0.2.2 安装包与编辑器 exe 复制到未加信任的 `%LOCALAPPDATA%\Temp` 子目录，PATH 只含 System32 启动，进程正常运行，文件未被隔离；同一位置的 gnullvm 构建此前在运行时被隔离。安装程序未实际运行；未做代码签名，其他杀毒软件和 SmartScreen 仍可能提示。
+
+## 2026-11-10 最近文件夹与标题级别
+
+- 浏览器加载真实 `App` 并模拟 IPC：设置中预置含非法项的最近列表，欢迎页只列出有效路径；从列表打开工作区后目录树正常，并被移到列表最前写回设置。编辑区 H1～H3 标题左侧出现对应级别标记，位于标题左侧留白内；大纲行显示 H1、H2、H3。tsc 通过。
+- 未执行：原生窗口内查看（截图因窗口隐藏未取得）；h4～h6 的显示未用样例确认。
 

@@ -57,7 +57,13 @@ export interface Settings {
   figure: {
     style: FigureStyle;
   };
+  history: {
+    /** 最近打开的工作区文件夹，最新的在前，最多 MAX_RECENT_WORKSPACES 个。 */
+    recentWorkspaces: string[];
+  };
 }
+
+export const MAX_RECENT_WORKSPACES = 10;
 
 function defaultHotkeys(): Hotkeys {
   const entries = ACTIONS.map((action) => [action.id, action.defaultKey]);
@@ -78,6 +84,7 @@ export const DEFAULT_SETTINGS: Settings = {
   },
   wordExport: { template: "", mode: "auto", includeNotes: true },
   figure: { style: "mono" },
+  history: { recentWorkspaces: [] },
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -99,6 +106,24 @@ function mergeSection<T extends object>(defaults: T, saved: unknown): T {
   return result as T;
 }
 
+/** 只保留字符串路径，按不区分大小写去重并截断。 */
+function normalizeRecentWorkspaces(saved: unknown): string[] {
+  if (!isRecord(saved) || !Array.isArray(saved.recentWorkspaces)) {
+    return [];
+  }
+  const result: string[] = [];
+  for (const item of saved.recentWorkspaces) {
+    if (typeof item !== "string" || !item.trim()) {
+      continue;
+    }
+    const duplicate = result.some((existing) => existing.toLowerCase() === item.toLowerCase());
+    if (!duplicate) {
+      result.push(item);
+    }
+  }
+  return result.slice(0, MAX_RECENT_WORKSPACES);
+}
+
 export function normalizeSettings(saved: unknown): Settings {
   const root = isRecord(saved) ? saved : {};
   return {
@@ -108,5 +133,6 @@ export function normalizeSettings(saved: unknown): Settings {
     copilot: mergeSection(DEFAULT_SETTINGS.copilot, root.copilot),
     wordExport: mergeSection(DEFAULT_SETTINGS.wordExport, root.wordExport),
     figure: mergeSection(DEFAULT_SETTINGS.figure, root.figure),
+    history: { recentWorkspaces: normalizeRecentWorkspaces(root.history) },
   };
 }

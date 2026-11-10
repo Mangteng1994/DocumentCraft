@@ -62,6 +62,9 @@ const OutlineItem = memo(function OutlineItem({
         ) : (
           <span className="dc-outline-toggle" />
         )}
+        <span className="dc-outline-level" aria-label={`${node.level} 级标题`}>
+          H{node.level}
+        </span>
         <span className="dc-outline-text" title={node.text}>
           {node.text}
         </span>
