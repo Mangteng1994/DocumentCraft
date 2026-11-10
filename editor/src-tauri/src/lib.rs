@@ -18,6 +18,30 @@ fn open_path(app: tauri::AppHandle, path: String) -> Result<(), String> {
         .map_err(|error| format!("无法打开文件：{error}"))
 }
 
+/// 内置 Word 模板的文件名。安装版放在 exe 同目录，由 tauri.bundle.conf.json 作为资源安装。
+const BUILTIN_TEMPLATE_NAME: &str = "builtin-template.docx";
+
+/// 返回内置 Word 模板的路径：先找 exe 同目录（安装版），再找仓库内的 editor/resources（开发模式）。
+#[tauri::command]
+fn builtin_template() -> Result<String, String> {
+    if let Ok(executable) = std::env::current_exe() {
+        if let Some(folder) = executable.parent() {
+            let installed = folder.join(BUILTIN_TEMPLATE_NAME);
+            if installed.is_file() {
+                return Ok(installed.to_string_lossy().into_owned());
+            }
+        }
+    }
+    let source = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("resources")
+        .join(BUILTIN_TEMPLATE_NAME);
+    if source.is_file() {
+        return Ok(source.to_string_lossy().into_owned());
+    }
+    Err("找不到内置 Word 模板，请在设置中选择模板。".to_string())
+}
+
 /// 启动应用并注册命令。
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -40,6 +64,7 @@ pub fn run() {
             docflow::docflow_stream,
             docflow::docflow_cancel,
             open_path,
+            builtin_template,
         ]);
     builder
         .run(tauri::generate_context!())

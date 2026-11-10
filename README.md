@@ -51,7 +51,7 @@
 | 快捷键 | 录制、清除、恢复默认 |
 | Copilot | Copilot 文件夹、自动附带当前笔记、自动保存对话、发送快捷键、附加系统提示词、命令管理 |
 | AI 连接 | 兼容 API 或 ChatGPT 套餐。API Key 只保存在本次会话内存，也可由 `OPENAI_API_KEY` 提供 |
-| MD 转 Word | 默认模板、模板模式、是否包含批注，并导出当前文档。批注无法定位或位于暂不支持的段落（含公式、图片、换行等）时会先提示，可明确跳过 |
+| MD 转 Word | 内置「我的文档模板」（可更换为自定义模板，也可恢复内置）、模板模式、是否包含批注，并导出当前文档。批注无法定位或位于暂不支持的段落（含公式、图片、换行等）时会先提示，可明确跳过 |
 | 科研流程图 | 默认绘图风格，并为当前文档生成配图，见下文「科研配图」 |
 
 编辑器设置保存在 `%APPDATA%\app.documentcraft.editor\settings.json`，AI 连接设置由 docflow 保存在 `%LOCALAPPDATA%\DocumentCraft\ai-settings.json`。

@@ -6,7 +6,7 @@ DocumentCraft 是面向 Windows 与 WPS 的本地科研文档阅读编辑器。�
 
 | 目录 | 内容 | 入库 |
 | --- | --- | --- |
-| `editor/` | 阅读编辑器。`src/` 前端，`src-tauri/` Rust 后端，`src/vendor/vmark/` 为 VMark 移植代码（改动记录在其 README） | 是 |
+| `editor/` | 阅读编辑器。`src/` 前端，`src-tauri/` Rust 后端，`src/vendor/vmark/` 为 VMark 移植代码（改动记录在其 README），`resources/` 为随安装包内置的资源（如 Word 模板） | 是 |
 | `editor/src/editor/` | 编辑区：schema、批注、快捷命令、右键菜单 | 是 |
 | `editor/src/features/` | 编辑器功能：`copilot/`、`comments/`、`settings/`（含 MD 转 Word、科研流程图、AI 连接） | 是 |
 | `editor/src/settings/` | 设置结构、持久化、主题、快捷键分发 | 是 |
