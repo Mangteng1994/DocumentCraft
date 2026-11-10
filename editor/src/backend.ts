@@ -29,6 +29,8 @@ export function createFolder(directory: string, name: string): Promise<string> {
 export interface SearchMatch {
   line: number;
   occurrence: number;
+  /** 位置说明：纯文本是行号，文档是「第 N 页」「第 N 段」等。 */
+  locator: string;
   before: string;
   hit: string;
   after: string;
@@ -42,9 +44,33 @@ export interface SearchFile {
   more: boolean;
 }
 
+/** Word、Excel、PowerPoint、PDF 正文索引的覆盖情况。 */
+export interface DocStats {
+  total: number;
+  indexed: number;
+  failed: number;
+  no_text: number;
+  running: boolean;
+}
+
 export interface SearchResult {
   files: SearchFile[];
   truncated: boolean;
+  docs: DocStats;
+}
+
+/** 文档索引进度，来自后端的 search-index 事件。 */
+export interface IndexProgress {
+  root: string;
+  done: number;
+  total: number;
+  failed: number;
+  running: boolean;
+}
+
+/** 在后台建立或增量更新文档正文索引。已有任务在运行时立即返回。 */
+export function indexWorkspace(root: string): Promise<void> {
+  return invoke<void>("index_workspace", { root });
 }
 
 /** 在工作区中搜索，不区分大小写。mode 见 settings/schema 的 SEARCH_MODES。 */

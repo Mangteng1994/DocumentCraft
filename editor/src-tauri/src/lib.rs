@@ -4,8 +4,10 @@
 //! sidecar 和用系统程序打开导出结果。VMark 原有的终端、MCP、多窗口、自动更新等后端模块不移植。
 
 mod docflow;
+mod extract;
 mod images;
 mod settings;
+mod textindex;
 mod workspace;
 
 use tauri_plugin_opener::OpenerExt;
@@ -72,6 +74,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .manage(docflow::Jobs::default())
+        .manage(std::sync::Arc::new(textindex::SearchIndex::default()))
         .invoke_handler(tauri::generate_handler![
             workspace::list_tree,
             workspace::read_text,
@@ -81,6 +84,7 @@ pub fn run() {
             workspace::create_folder,
             workspace::remove_markdown,
             workspace::search_workspace,
+            workspace::index_workspace,
             images::store_image,
             images::import_image,
             settings::load_settings,

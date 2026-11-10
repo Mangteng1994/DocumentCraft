@@ -97,6 +97,7 @@
   --dc-size-sidebar: 260px;
   --dc-size-sidebar-min: 180px;
   --dc-size-panel: 360px;
+  --dc-size-locator: 52px;                  /* 搜索结果里「第 12 页」这类位置说明的最小宽度 */
   --dc-size-resizer: 6px;                   /* 侧栏拖动条的命中宽度 */
   --dc-size-doc-tab-min: 96px;
   --dc-size-doc-tab-max: 220px;
