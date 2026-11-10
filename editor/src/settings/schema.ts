@@ -42,6 +42,8 @@ export interface Settings {
   files: {
     /** 目录树除 Markdown 外也列出其他文件，并保留空文件夹。 */
     showAllFiles: boolean;
+    /** 侧栏搜索的范围，见 SEARCH_MODES。 */
+    searchMode: SearchMode;
   };
   hotkeys: Hotkeys;
   copilot: {
@@ -72,6 +74,10 @@ export interface Settings {
   };
 }
 
+/** 搜索范围：所有（文件名 + 纯文本正文）、所有文件名、所有纯文本正文。值与 Rust 端 search_workspace 的 mode 一致。 */
+export const SEARCH_MODES = ["all", "names", "text"] as const;
+export type SearchMode = (typeof SEARCH_MODES)[number];
+
 export const MAX_RECENT_WORKSPACES = 10;
 
 function defaultHotkeys(): Hotkeys {
@@ -81,7 +87,7 @@ function defaultHotkeys(): Hotkeys {
 
 export const DEFAULT_SETTINGS: Settings = {
   appearance: { theme: "system" },
-  files: { showAllFiles: false },
+  files: { showAllFiles: false, searchMode: "all" },
   hotkeys: defaultHotkeys(),
   copilot: {
     folder: "copilot",
@@ -140,12 +146,17 @@ const LEGACY_SEARCH_HOTKEY = "Ctrl+Shift+F";
 export function normalizeSettings(saved: unknown): Settings {
   const root = isRecord(saved) ? saved : {};
   const hotkeys = mergeSection(DEFAULT_SETTINGS.hotkeys, root.hotkeys);
+  const files = mergeSection(DEFAULT_SETTINGS.files, root.files);
+  // 设置文件被手改成未知的搜索范围时回退到默认值，避免后端报「未知的搜索范围」。
+  if (!SEARCH_MODES.includes(files.searchMode)) {
+    files.searchMode = DEFAULT_SETTINGS.files.searchMode;
+  }
   if (hotkeys.searchWorkspace === LEGACY_SEARCH_HOTKEY) {
     hotkeys.searchWorkspace = DEFAULT_SETTINGS.hotkeys.searchWorkspace;
   }
   return {
     appearance: mergeSection(DEFAULT_SETTINGS.appearance, root.appearance),
-    files: mergeSection(DEFAULT_SETTINGS.files, root.files),
+    files,
     hotkeys,
     copilot: mergeSection(DEFAULT_SETTINGS.copilot, root.copilot),
     wordExport: mergeSection(DEFAULT_SETTINGS.wordExport, root.wordExport),

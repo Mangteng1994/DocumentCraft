@@ -234,14 +234,48 @@ pub fn remove_markdown(path: String) -> Result<(), String> {
     fs::remove_file(&target).map_err(|error| format!("无法删除 {path}：{error}"))
 }
 
-/// 搜索最多读取的 Markdown 文件数、单个文件大小，以及返回的匹配总数和单文件匹配数。
-const MAX_SEARCH_FILES: usize = 5000;
+/// 搜索最多收集的文件数、读取正文的单个文件大小，以及返回的匹配总数和单文件匹配数。
+const MAX_SEARCH_FILES: usize = 20000;
 const MAX_SEARCH_FILE_BYTES: u64 = 4 * 1024 * 1024;
 const MAX_SEARCH_MATCHES: usize = 500;
 const MAX_MATCHES_PER_FILE: usize = 50;
 /// 匹配前后保留的上下文字符数。
 const SNIPPET_BEFORE: usize = 30;
 const SNIPPET_AFTER: usize = 60;
+/// 按纯文本读取正文的扩展名。Word、PDF、Excel 等二进制格式不在其中。
+/// 只按扩展名判断，不嗅探内容：这些文件不是 UTF-8 时读取会失败，只能按文件名匹配。
+const TEXT_EXTENSIONS: [&str; 44] = [
+    "md", "markdown", "txt", "text", "csv", "tsv", "json", "jsonc", "yaml", "yml", "toml", "ini", "cfg", "conf",
+    "log", "xml", "html", "htm", "css", "js", "jsx", "ts", "tsx", "py", "rs", "java", "c", "cpp", "h", "hpp", "go",
+    "sh", "sql", "tex", "bib", "rst", "org", "srt", "vtt", "base", "canvas", "ps1", "bat", "cmd",
+];
+
+/// 搜索范围：全部（文件名 + 纯文本正文）、只搜文件名、只搜纯文本正文。
+#[derive(Clone, Copy, PartialEq)]
+enum SearchMode {
+    All,
+    Names,
+    Text,
+}
+
+impl SearchMode {
+    fn parse(value: &str) -> Result<SearchMode, String> {
+        match value {
+            "all" => Ok(SearchMode::All),
+            "names" => Ok(SearchMode::Names),
+            "text" => Ok(SearchMode::Text),
+            other => Err(format!("未知的搜索范围：{other}")),
+        }
+    }
+
+    fn matches_names(self) -> bool {
+        self != SearchMode::Text
+    }
+
+    fn matches_content(self) -> bool {
+        self != SearchMode::Names
+    }
+}
 
 #[derive(Serialize)]
 pub struct SearchMatch {
@@ -312,8 +346,20 @@ fn snippet(chars: &[char], start: usize, length: usize) -> (String, String, Stri
     (before.trim_start().to_string(), hit, after.trim_end().to_string())
 }
 
-/// 收集工作区内的 Markdown 文件，规则与目录树一致：跳过隐藏目录、链接和目录联接。
-fn collect_markdown(path: &Path, depth: usize, files: &mut Vec<PathBuf>) {
+/// 扩展名属于可按纯文本读取的类型。
+fn is_text_file(path: &Path) -> bool {
+    let extension = path.extension().and_then(|value| value.to_str());
+    match extension {
+        Some(value) => {
+            let lower = value.to_ascii_lowercase();
+            TEXT_EXTENSIONS.contains(&lower.as_str())
+        }
+        None => false,
+    }
+}
+
+/// 收集工作区内的全部文件，规则与目录树一致：跳过隐藏文件和目录、链接和目录联接。
+fn collect_files(path: &Path, depth: usize, files: &mut Vec<PathBuf>) {
     if depth >= MAX_DEPTH || files.len() >= MAX_SEARCH_FILES {
         return;
     }
@@ -342,36 +388,50 @@ fn collect_markdown(path: &Path, depth: usize, files: &mut Vec<PathBuf>) {
             continue;
         }
         if metadata.is_dir() {
-            collect_markdown(&child, depth + 1, files);
-        } else if is_markdown(&child) && metadata.len() <= MAX_SEARCH_FILE_BYTES {
+            collect_files(&child, depth + 1, files);
+        } else {
             files.push(child);
         }
     }
 }
 
-fn search_file(path: &Path, needle: &[char], budget: usize) -> Option<SearchFile> {
+/// 读取纯文本文件的内容。过大或不是 UTF-8 时返回 None，此时该文件只能按文件名匹配。
+fn read_searchable_text(path: &Path) -> Option<String> {
+    if !is_text_file(path) {
+        return None;
+    }
+    let metadata = fs::metadata(path).ok()?;
+    if metadata.len() > MAX_SEARCH_FILE_BYTES {
+        return None;
+    }
+    let bytes = fs::read(path).ok()?;
+    String::from_utf8(bytes).ok()
+}
+
+fn search_file(path: &Path, needle: &[char], mode: SearchMode, budget: usize) -> Option<SearchFile> {
     let name = path.file_name()?.to_string_lossy().into_owned();
-    let name_match = !find_all(&lower_chars(&name), needle).is_empty();
-    // 非 UTF-8 文件只按文件名匹配。
-    let text = fs::read(path).ok().and_then(|bytes| String::from_utf8(bytes).ok()).unwrap_or_default();
-    let limit = budget.min(MAX_MATCHES_PER_FILE);
+    let name_match = mode.matches_names() && !find_all(&lower_chars(&name), needle).is_empty();
     let mut matches = Vec::new();
-    let mut occurrence = 0;
     let mut more = false;
-    for (index, line) in text.lines().enumerate() {
-        let original: Vec<char> = line.chars().collect();
-        let lowered = lower_chars(line);
-        for start in find_all(&lowered, needle) {
-            if matches.len() >= limit {
-                more = true;
+    if mode.matches_content() {
+        let text = read_searchable_text(path).unwrap_or_default();
+        let limit = budget.min(MAX_MATCHES_PER_FILE);
+        let mut occurrence = 0;
+        for (index, line) in text.lines().enumerate() {
+            let original: Vec<char> = line.chars().collect();
+            let lowered = lower_chars(line);
+            for start in find_all(&lowered, needle) {
+                if matches.len() >= limit {
+                    more = true;
+                    break;
+                }
+                let (before, hit, after) = snippet(&original, start, needle.len());
+                matches.push(SearchMatch { line: index + 1, occurrence, before, hit, after });
+                occurrence += 1;
+            }
+            if more {
                 break;
             }
-            let (before, hit, after) = snippet(&original, start, needle.len());
-            matches.push(SearchMatch { line: index + 1, occurrence, before, hit, after });
-            occurrence += 1;
-        }
-        if more {
-            break;
         }
     }
     if !name_match && matches.is_empty() {
@@ -386,10 +446,10 @@ fn search_file(path: &Path, needle: &[char], budget: usize) -> Option<SearchFile
     })
 }
 
-fn search_root(root: &Path, query: &str) -> SearchResult {
+fn search_root(root: &Path, query: &str, mode: SearchMode) -> SearchResult {
     let needle = lower_chars(query.trim());
     let mut paths = Vec::new();
-    collect_markdown(root, 0, &mut paths);
+    collect_files(root, 0, &mut paths);
     let mut truncated = paths.len() >= MAX_SEARCH_FILES;
     let mut files = Vec::new();
     let mut total = 0;
@@ -398,7 +458,7 @@ fn search_root(root: &Path, query: &str) -> SearchResult {
             truncated = true;
             break;
         }
-        if let Some(file) = search_file(&path, &needle, MAX_SEARCH_MATCHES - total) {
+        if let Some(file) = search_file(&path, &needle, mode, MAX_SEARCH_MATCHES - total) {
             total += file.matches.len();
             files.push(file);
         }
@@ -406,9 +466,11 @@ fn search_root(root: &Path, query: &str) -> SearchResult {
     SearchResult { files, truncated }
 }
 
-/// 在工作区所有 Markdown 中按文件名和正文搜索，不区分大小写。结果按文件路径排序。
+/// 在工作区中搜索，不区分大小写，结果按文件路径排序。mode 取 `all`（文件名 + 纯文本正文）、
+/// `names`（只搜文件名，含全部文件类型）、`text`（只搜纯文本正文）。
 #[tauri::command]
-pub async fn search_workspace(root: String, query: String) -> Result<SearchResult, String> {
+pub async fn search_workspace(root: String, query: String, mode: String) -> Result<SearchResult, String> {
+    let mode = SearchMode::parse(&mode)?;
     if query.trim().is_empty() {
         return Ok(SearchResult { files: Vec::new(), truncated: false });
     }
@@ -417,7 +479,7 @@ pub async fn search_workspace(root: String, query: String) -> Result<SearchResul
         if !path.is_dir() {
             return Err(format!("工作区不是文件夹：{root}"));
         }
-        Ok(search_root(&path, &query))
+        Ok(search_root(&path, &query, mode))
     });
     task.await.map_err(|error| error.to_string())?
 }
@@ -484,9 +546,8 @@ mod tests {
         let root = scratch("search");
         fs::write(root.join("流量报告.md"), "# Flow 试验\n第二行没有\n入口 flow 与 FLOW 两处\n").unwrap();
         fs::write(root.join("子目录").join("笔记.md"), "无关内容\n").unwrap();
-        fs::write(root.join("说明.txt"), "flow").unwrap();
         fs::write(root.join(".hidden").join("隐藏.md"), "flow").unwrap();
-        let result = search_root(&root, "flow");
+        let result = search_root(&root, "flow", SearchMode::All);
         assert_eq!(result.files.len(), 1);
         let file = &result.files[0];
         assert_eq!(file.name, "流量报告.md");
@@ -497,10 +558,47 @@ mod tests {
         assert_eq!(occurrences, vec![0, 1, 2]);
         assert_eq!(file.matches[2].hit, "FLOW");
         assert_eq!(file.matches[1].before, "入口 ");
-        let by_name = search_root(&root, "笔记");
+        let by_name = search_root(&root, "笔记", SearchMode::All);
         assert_eq!(by_name.files.len(), 1);
         assert!(by_name.files[0].name_match);
         assert!(by_name.files[0].matches.is_empty());
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn search_modes_cover_names_of_all_files_and_text_content() {
+        let root = scratch("modes");
+        fs::write(root.join("报告.md"), "# 流速\n").unwrap();
+        fs::write(root.join("流速记录.txt"), "第一行\n流速 0.5\n").unwrap();
+        fs::write(root.join("流速分析.docx"), [0u8, 1, 2]).unwrap();
+        // xlsx 是压缩包，正文里即使出现关键词也不读取。
+        fs::write(root.join("数据.xlsx"), "PK 流速".as_bytes()).unwrap();
+        fs::write(root.join("旧文件.txt"), [0xB6u8, 0xD4, 0xB1, 0xC8]).unwrap();
+        fs::write(root.join(".hidden").join("流速.txt"), "流速").unwrap();
+        let names_of = |result: &SearchResult| -> Vec<String> { result.files.iter().map(|file| file.name.clone()).collect() };
+
+        // 所有：全部文件的文件名 + 纯文本正文；二进制文件正文不读取，隐藏目录不搜。
+        let all = search_root(&root, "流速", SearchMode::All);
+        assert_eq!(names_of(&all), vec!["报告.md", "流速分析.docx", "流速记录.txt"]);
+        let docx = all.files.iter().find(|file| file.name == "流速分析.docx").unwrap();
+        assert!(docx.name_match && docx.matches.is_empty());
+        let text = all.files.iter().find(|file| file.name == "流速记录.txt").unwrap();
+        assert!(text.name_match);
+        assert_eq!(text.matches.len(), 1);
+        assert_eq!(text.matches[0].line, 2);
+
+        // 所有文件名：只匹配文件名，不读取正文。
+        let names = search_root(&root, "流速", SearchMode::Names);
+        assert_eq!(names_of(&names), vec!["流速分析.docx", "流速记录.txt"]);
+        assert!(names.files.iter().all(|file| file.matches.is_empty()));
+
+        // 所有纯文本正文：只匹配纯文本内容，文件名不参与，非 UTF-8 的文本被跳过。
+        let content = search_root(&root, "流速", SearchMode::Text);
+        assert_eq!(names_of(&content), vec!["报告.md", "流速记录.txt"]);
+        assert!(content.files.iter().all(|file| !file.name_match));
+        let legacy = search_root(&root, "旧文件", SearchMode::Text);
+        assert!(legacy.files.is_empty());
+        assert!(SearchMode::parse("bogus").is_err());
         let _ = fs::remove_dir_all(&root);
     }
 

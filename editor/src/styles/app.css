@@ -2281,3 +2281,91 @@ body.is-resizing {
   cursor: col-resize;
   user-select: none;
 }
+
+/* 搜索范围按钮与菜单（DC-058）：按钮替代搜索框左侧的放大镜图标，菜单向下展开。 */
+.dc-search-bar {
+  position: relative;
+}
+
+.dc-search-mode-button {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: var(--dc-space-2xs);
+  height: var(--dc-size-icon-button);
+  padding: 0 var(--dc-space-xs);
+  border: none;
+  border-radius: var(--dc-radius-sm);
+  background: transparent;
+  color: var(--dc-color-ink-faint);
+  cursor: pointer;
+}
+
+.dc-search-mode-button:hover,
+.dc-search-mode-button[aria-expanded="true"] {
+  background: var(--dc-color-surface-hover);
+  color: var(--dc-color-ink);
+}
+
+.dc-search-mode-menu {
+  position: absolute;
+  top: calc(100% - var(--dc-space-sm));
+  left: var(--dc-space-md);
+  z-index: var(--dc-z-menu);
+  display: flex;
+  flex-direction: column;
+  width: var(--dc-size-popover);
+  max-width: calc(100% - var(--dc-space-xl));
+  padding: var(--dc-space-xs);
+  border: var(--dc-border);
+  border-radius: var(--dc-radius-md);
+  background: var(--dc-color-surface-raised);
+  box-shadow: var(--dc-shadow-popover);
+}
+
+.dc-search-mode-item {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--dc-space-sm);
+  padding: var(--dc-space-sm);
+  border: none;
+  border-radius: var(--dc-radius-sm);
+  background: transparent;
+  color: var(--dc-color-ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.dc-search-mode-item:hover {
+  background: var(--dc-color-surface-hover);
+}
+
+.dc-search-mode-check {
+  display: inline-flex;
+  flex-shrink: 0;
+  justify-content: center;
+  width: var(--dc-indent-tree);
+  color: var(--dc-color-accent-text);
+}
+
+.dc-search-mode-text {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dc-space-2xs);
+  min-width: 0;
+}
+
+.dc-search-mode-label {
+  font-size: var(--dc-font-size-md);
+}
+
+.dc-search-mode-item.is-current .dc-search-mode-label {
+  font-weight: var(--dc-font-weight-medium);
+}
+
+.dc-search-mode-description {
+  color: var(--dc-color-ink-faint);
+  font-size: var(--dc-font-size-sm);
+  line-height: var(--dc-line-height-ui);
+}

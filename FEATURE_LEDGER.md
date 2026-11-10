@@ -55,6 +55,7 @@
 | DC-055 | 侧栏宽度拖动 | 左侧栏与右侧栏边缘可拖动调整宽度，有最小和最大宽度，双击恢复默认；宽度保存在设置中，重启后保留 | 已验收（模拟 IPC）· `editor/src/components/PaneResizer.tsx`、`settings/schema.ts` 的 `layout`、`tokens.ts` 的 `paneWidth` |
 | DC-056 | 状态栏工作区切换 | 状态栏左侧只显示当前工作区文件夹名，悬停显示完整路径；点击弹出最近打开的工作区列表，选择后切换，也可打开其他文件夹 | 已验收（模拟 IPC）· `editor/src/components/WorkspaceSwitcher.tsx` |
 | DC-057 | 全部折叠与全部展开 | 文件树头部和大纲头部各有「全部折叠」「全部展开」按钮，一键折叠或展开所有文件夹、所有带子标题的标题 | 已验收（模拟 IPC）· `editor/src/sidebar/FileTree.tsx`、`OutlineView.tsx` |
+| DC-058 | 搜索范围模式 | 搜索框左侧的范围按钮提供三种模式：「所有」（所有文件的文件名 + 纯文本文件正文，暂不含 Word、PDF、Excel 正文）、「所有文件名」（只匹配文件名，含非 Markdown 文件）、「所有纯文本正文」（只匹配纯文本文件内容）；模式保存在设置中；点击 Markdown 结果在编辑器打开，其他文件用系统默认应用打开（程序和脚本拒绝运行）；隐藏文件夹不搜，非 UTF-8 文本只按文件名匹配 | 已验收（模拟 IPC + Rust 测试）· `editor/src/sidebar/SearchView.tsx`、`settings/schema.ts` 的 `files.searchMode`、`src-tauri/src/workspace.rs` 的 `SearchMode` |
 
 ## Should
 
@@ -247,3 +248,10 @@ foreach ($step in 'save','reopen','style','full','skip','plain') {
 - 搜索（DC-051 调整）：去掉「搜索」标签，`Ctrl+F` 在标签栏下方出现搜索框并聚焦；输入关键词后结果替换目录树，Esc 或 × 关闭并恢复目录树；在大纲视图按 `Ctrl+F` 会切回文件视图。模拟 IPC：「流量」命中 2 个文档 5 处，点击「重复句」的第 2 条后选中第二段中的文字，结果列表保持显示。设置里保存的旧默认 `Ctrl+Shift+F` 读取时迁移为 `Ctrl+F`；若有人刻意把搜索绑成 `Ctrl+Shift+F`，也会被迁移，需重新录制。
 - 全部折叠、全部展开（DC-057）：文件树头部和大纲头部各两个按钮。模拟 IPC：展开后列出所有层级的文件夹与文件，折叠后只剩顶层；大纲折叠后只剩 H1，展开后恢复 4 行；头部在默认宽度下不溢出。tsc 通过。
 - 未执行：原生窗口内目视检查（窗口隐藏，截图未取得）。
+
+## 2026-11-10 搜索范围模式
+
+- 搜索框左侧的放大镜改为范围按钮，菜单三项：所有、所有文件名、所有纯文本正文；选择保存在设置 `files.searchMode`，未知值读取时回退为「所有」。后端 `search_workspace(root, query, mode)` 的纯文本按扩展名白名单（md、txt、csv、json、yaml、代码与日志等 44 种）判断，Word、PDF、Excel 等不读取正文。
+- Rust 测试：「所有」列出文件名匹配的 docx 与 txt 正文匹配，xlsx 正文不读；「所有文件名」不读正文；「所有纯文本正文」文件名不参与、非 UTF-8 的 txt 被跳过；隐藏目录不搜；未知模式报错。共 10 项通过。
+- 模拟 IPC：三种模式切换后结果与提示语正确；点击 Markdown 结果在编辑器打开，点击 docx 或 txt 结果调用系统默认应用；菜单打开时 Esc 只关菜单，再按一次才关闭搜索。tsc 通过。
+- 限制：非 UTF-8（如 GBK）的 txt 只能按文件名匹配；单文件超过 4 MB 不读正文；最多收集 2 万个文件。未执行：原生窗口目视检查。
