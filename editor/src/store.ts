@@ -30,6 +30,24 @@ export interface DocumentTab {
   dirty: boolean;
 }
 
+/** 用读到的文件夹替换树中同路径的节点，只沿着路径前缀向下找，其余节点原样复用。 */
+function replaceTreeNode(node: TreeNode, loaded: TreeNode): TreeNode {
+  if (node.path === loaded.path) {
+    return loaded;
+  }
+  const lower = loaded.path.toLowerCase();
+  let changed = false;
+  const children = node.children.map((child) => {
+    if (!child.is_dir || !lower.startsWith(child.path.toLowerCase())) {
+      return child;
+    }
+    const replaced = replaceTreeNode(child, loaded);
+    changed = changed || replaced !== child;
+    return replaced;
+  });
+  return changed ? { ...node, children } : node;
+}
+
 export interface AppState {
   workspace: string | null;
   tree: TreeNode | null;
@@ -64,6 +82,8 @@ export interface AppState {
 
   setWorkspace: (workspace: string | null, tree: TreeNode | null) => void;
   setTree: (tree: TreeNode | null) => void;
+  /** 把按需加载读到的一个文件夹合并进当前目录树。 */
+  mergeTreeNode: (loaded: TreeNode) => void;
   setFilePath: (path: string | null) => void;
   setDirty: (dirty: boolean) => void;
   /** 在当前页签右侧加入页签；已存在时不变。 */
@@ -113,6 +133,7 @@ export const useAppStore = create<AppState>((set) => ({
   // 换工作区后旧的索引进度不再适用。
   setWorkspace: (workspace, tree) => set((state) => ({ workspace, tree, indexProgress: workspace === state.workspace ? state.indexProgress : null })),
   setTree: (tree) => set({ tree }),
+  mergeTreeNode: (loaded) => set((state) => ({ tree: state.tree ? replaceTreeNode(state.tree, loaded) : state.tree })),
   setFilePath: (filePath) => set({ filePath }),
   // 未保存状态同时记在当前页签上，切换页签后据此恢复。
   setDirty: (dirty) =>

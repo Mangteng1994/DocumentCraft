@@ -1,12 +1,13 @@
 /**
  * 工作区文件树。行样式与交互参照 VMark FileExplorer/FileNode，去掉了右键菜单、
  * 重命名、拖放和文件监听，保留浏览、打开、全部折叠与全部展开，以及在选中文件夹下新建 Markdown 和文件夹。
+ * 工作区很大（网络共享、数万文件）时目录树按需加载：打开时只读顶层，展开哪个文件夹才读取哪个。
  */
 
-import { memo, useCallback, useState } from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, File, FilePlus, FileText, Folder, FolderOpen, FolderPlus, RefreshCw } from "lucide-react";
 import type { TreeNode } from "../backend";
-import { chooseWorkspace, createFolderIn, createNote, openDocument, openWithSystem, refreshTree } from "../documentActions";
+import { chooseWorkspace, createFolderIn, createNote, loadFolder, openDocument, openWithSystem, refreshTree } from "../documentActions";
 import { relativePath } from "../paths";
 import { useAppStore } from "../store";
 import { iconSize, iconStroke } from "../styles/tokens";
@@ -15,12 +16,27 @@ const MARKDOWN_NAME = /\.(md|markdown)$/i;
 
 type CreateKind = "note" | "folder";
 
-/** 收集树中所有文件夹的路径（不含根目录本身），供「全部展开」使用。 */
-function collectDirectories(node: TreeNode, result: Set<string>): Set<string> {
+/** 收集树中已读取的文件夹的路径（不含根目录本身），供「全部展开」使用。按需加载时不会因此去读取未读取的文件夹。 */
+function collectLoadedDirectories(node: TreeNode, result: Set<string>): Set<string> {
   for (const child of node.children) {
-    if (child.is_dir) {
+    if (child.is_dir && child.loaded) {
       result.add(child.path);
-      collectDirectories(child, result);
+      collectLoadedDirectories(child, result);
+    }
+  }
+  return result;
+}
+
+/** 已展开但还没读取子项的文件夹路径，需要按需读取。 */
+function collectUnloadedExpanded(node: TreeNode, expanded: Set<string>, result: string[]): string[] {
+  for (const child of node.children) {
+    if (!child.is_dir || !expanded.has(child.path)) {
+      continue;
+    }
+    if (child.loaded) {
+      collectUnloadedExpanded(child, expanded, result);
+    } else {
+      result.push(child.path);
     }
   }
   return result;
@@ -92,6 +108,11 @@ const TreeRow = memo(function TreeRow({ node, depth, activePath, expanded, selec
         </span>
         <span className="dc-tree-name">{node.name}</span>
       </div>
+      {node.is_dir && isOpen && !node.loaded && (
+        <div className="dc-tree-hint" style={{ "--dc-tree-depth": depth + 1 } as React.CSSProperties}>
+          正在读取…
+        </div>
+      )}
       {node.is_dir && isOpen && node.children.length > 0 && (
         <ul role="group" className="dc-tree-group">
           {node.children.map((child) => (
@@ -108,6 +129,11 @@ const TreeRow = memo(function TreeRow({ node, depth, activePath, expanded, selec
           ))}
         </ul>
       )}
+      {node.is_dir && isOpen && node.loaded && node.truncated && (
+        <div className="dc-tree-hint" style={{ "--dc-tree-depth": depth + 1 } as React.CSSProperties}>
+          条目太多，只显示了前一部分。
+        </div>
+      )}
     </li>
   );
 });
@@ -120,6 +146,22 @@ export function FileTree() {
   const [selectedDir, setSelectedDir] = useState<string | null>(null);
   const [creating, setCreating] = useState<CreateKind | null>(null);
   const [draftName, setDraftName] = useState("");
+  // 正在读取的文件夹，避免同一个文件夹被重复请求。
+  const loading = useRef<Set<string>>(new Set());
+
+  // 按需加载：展开了还没读取子项的文件夹时去读取；刷新目录树后展开的文件夹也会重新读取。
+  useEffect(() => {
+    if (!tree) {
+      return;
+    }
+    for (const path of collectUnloadedExpanded(tree, expanded, [])) {
+      if (loading.current.has(path)) {
+        continue;
+      }
+      loading.current.add(path);
+      void loadFolder(path).finally(() => loading.current.delete(path));
+    }
+  }, [tree, expanded]);
 
   const handleToggle = useCallback((path: string) => {
     setExpanded((previous) => {
@@ -139,7 +181,7 @@ export function FileTree() {
 
   const expandAll = () => {
     if (tree) {
-      setExpanded(collectDirectories(tree, new Set()));
+      setExpanded(collectLoadedDirectories(tree, new Set()));
     }
   };
 
@@ -212,6 +254,11 @@ export function FileTree() {
           </button>
         </div>
       </div>
+      {tree.lazy && (
+        <div className="dc-tree-note" role="note">
+          这个文件夹很大，已改为按需加载：展开哪个文件夹才读取哪个，不含 Markdown 的文件夹也会显示。
+        </div>
+      )}
       {creating && (
         <div className="dc-tree-create">
           <div className="dc-tree-create-hint">

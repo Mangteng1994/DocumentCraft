@@ -3,7 +3,7 @@
  */
 
 import { ask, open } from "@tauri-apps/plugin-dialog";
-import { createFolder, createMarkdown, docflow, errorText, listTree, openPath, readText, writeText } from "./backend";
+import { createFolder, createMarkdown, docflow, errorText, listDir, listTree, openPath, readText, writeText } from "./backend";
 import { setDocumentDirectory } from "./editor/assets";
 import {
   currentMarkdown,
@@ -80,6 +80,17 @@ export async function refreshTree(): Promise<void> {
   try {
     const tree = await listTree(store.workspace, showAllFiles());
     store.setTree(tree);
+  } catch (error) {
+    store.setStatus(errorText(error));
+  }
+}
+
+/** 按需加载：读取一个文件夹的子项并合并进目录树。失败时原因显示在状态栏，该文件夹保持未读取。 */
+export async function loadFolder(path: string): Promise<void> {
+  const store = useAppStore.getState();
+  try {
+    const node = await listDir(path, showAllFiles());
+    store.mergeTreeNode(node);
   } catch (error) {
     store.setStatus(errorText(error));
   }
