@@ -1,8 +1,9 @@
 /**
  * 文档正文索引的前端接入：监听后端的进度事件，并在需要时启动索引。
  *
- * 搜索 Word、Excel、PowerPoint、PDF 的正文依赖后端在后台建立的文本索引。第一次打开搜索时开始建立，
- * 之后只增量处理新增和修改过的文件。进度写入 store，搜索结果据此提示并按节流刷新。
+ * 搜索 Word、Excel、PowerPoint、PDF 的正文依赖后端在后台建立的文本索引。第一次打开搜索时先扫描文件夹、
+ * 再建立索引，之后只增量处理新增和修改过的文件。进度（扫描或解析）写入 store，搜索结果据此提示并按节流刷新。
+ * 大工作区（网络共享、文件很多）只扫描、不自动建立索引，用户在搜索结果上方点按钮后才建立。
  */
 
 import { listen } from "@tauri-apps/api/event";
@@ -39,10 +40,17 @@ export function listenSearchIndex(): () => void {
   };
 }
 
-/** 启动（或增量更新）当前工作区的文档索引。后端已有任务在运行时直接返回。 */
-export async function startIndexing(root: string): Promise<void> {
+interface IndexingOptions {
+  /** 大工作区也建立文档索引（默认只扫描）。 */
+  manual?: boolean;
+  /** 强制重新扫描文件列表，不复用缓存。 */
+  refresh?: boolean;
+}
+
+/** 启动（或增量更新）当前工作区的扫描与文档索引。后端已有任务在运行时直接返回。 */
+export async function startIndexing(root: string, options: IndexingOptions = {}): Promise<void> {
   try {
-    await indexWorkspace(root);
+    await indexWorkspace(root, options.manual ?? false, options.refresh ?? false);
   } catch (error) {
     useAppStore.getState().setStatus(`建立文档索引失败：${errorText(error)}`);
   }

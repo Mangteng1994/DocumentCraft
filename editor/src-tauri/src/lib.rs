@@ -77,6 +77,7 @@ pub fn run() {
         .manage(std::sync::Arc::new(textindex::SearchIndex::default()))
         .invoke_handler(tauri::generate_handler![
             workspace::list_tree,
+            workspace::list_dir,
             workspace::read_text,
             workspace::write_text,
             workspace::create_dir,

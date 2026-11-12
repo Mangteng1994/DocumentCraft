@@ -9,11 +9,25 @@ export interface TreeNode {
   path: string;
   is_dir: boolean;
   children: TreeNode[];
+  /** 子项是否已读取。按需加载时，没展开过的文件夹为 false，展开时用 listDir 读取。 */
+  loaded: boolean;
+  /** 文件夹的条目太多，只列出了前一部分。 */
+  truncated: boolean;
+  /** 工作区很大，目录树改为按需加载（只对根节点有意义）。 */
+  lazy: boolean;
 }
 
-/** showAll 为真时列出全部文件和空文件夹，否则只列 Markdown。 */
+/**
+ * showAll 为真时列出全部文件和空文件夹，否则只列 Markdown。工作区很大（超出读取预算）时只返回顶层，
+ * 根节点的 lazy 为真，其余文件夹的 loaded 为 false。
+ */
 export function listTree(root: string, showAll = false): Promise<TreeNode> {
   return invoke<TreeNode>("list_tree", { root, showAll });
+}
+
+/** 读取一个文件夹的直接子项，供按需加载时展开文件夹使用。 */
+export function listDir(path: string, showAll = false): Promise<TreeNode> {
+  return invoke<TreeNode>("list_dir", { path, showAll });
 }
 
 /** 在目录下新建空 Markdown 文件，返回路径；同名文件已存在时抛错。 */
@@ -51,26 +65,41 @@ export interface DocStats {
   failed: number;
   no_text: number;
   running: boolean;
+  /** 工作区较大，没有自动建立索引，等用户手动触发。 */
+  deferred: boolean;
 }
 
 export interface SearchResult {
   files: SearchFile[];
   truncated: boolean;
   docs: DocStats;
+  /** 现场遍历超时，需要先在后台扫描文件夹；本次没有搜索结果。 */
+  needs_scan: boolean;
+  /** 使用的是大工作区缓存的文件列表。 */
+  large: boolean;
+  /** 参与搜索的文件总数。 */
+  file_count: number;
+  /** 使用缓存文件列表时，这份列表是多少秒前扫描的。 */
+  scan_age_seconds: number;
 }
 
 /** 文档索引进度，来自后端的 search-index 事件。 */
 export interface IndexProgress {
   root: string;
+  /** scan：扫描文件夹，done 是已发现的文件数；index：解析文档。 */
+  phase: "scan" | "index";
   done: number;
   total: number;
   failed: number;
   running: boolean;
 }
 
-/** 在后台建立或增量更新文档正文索引。已有任务在运行时立即返回。 */
-export function indexWorkspace(root: string): Promise<void> {
-  return invoke<void>("index_workspace", { root });
+/**
+ * 在后台扫描文件夹并建立或增量更新正文索引。已有任务在运行时立即返回。
+ * 大工作区默认只扫描、不建索引；manual 为真时才建立。refresh 为真时强制重新扫描文件列表。
+ */
+export function indexWorkspace(root: string, manual = false, refresh = false): Promise<void> {
+  return invoke<void>("index_workspace", { root, manual, refresh });
 }
 
 /** 在工作区中搜索，不区分大小写。mode 见 settings/schema 的 SEARCH_MODES。 */

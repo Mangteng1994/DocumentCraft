@@ -501,8 +501,24 @@ textarea {
 }
 
 .dc-tree > .dc-sidebar-header,
-.dc-tree > .dc-tree-create {
+.dc-tree > .dc-tree-create,
+.dc-tree > .dc-tree-note {
   flex-shrink: 0;
+}
+
+/* 按需加载（DC-060）：模式说明、读取中和条目过多的提示。 */
+.dc-tree-note {
+  padding: 0 var(--dc-space-lg) var(--dc-space-sm);
+  color: var(--dc-color-ink-faint);
+  font-size: var(--dc-font-size-xs);
+  line-height: var(--dc-line-height-ui);
+}
+
+.dc-tree-hint {
+  padding: var(--dc-space-2xs) var(--dc-space-md) var(--dc-space-2xs)
+    calc(var(--dc-space-sm) + var(--dc-indent-tree) * 2 + var(--dc-tree-depth, 0) * var(--dc-indent-tree));
+  color: var(--dc-color-ink-faint);
+  font-size: var(--dc-font-size-sm);
 }
 
 .dc-tree-row {
@@ -1407,6 +1423,11 @@ textarea {
 
 .dc-link-button.is-large {
   font-size: var(--dc-font-size-ui);
+}
+
+.dc-link-button:disabled {
+  opacity: var(--dc-opacity-disabled);
+  cursor: default;
 }
 
 .dc-segmented {
@@ -2388,6 +2409,10 @@ body.is-resizing {
 }
 
 /* 文档索引提示（DC-059）：显示在搜索摘要下方，比摘要弱一档。 */
+.dc-search-note .dc-link-button {
+  margin-left: var(--dc-space-sm);
+}
+
 .dc-search-note {
   padding: 0 var(--dc-space-lg) var(--dc-space-sm);
   color: var(--dc-color-ink-faint);

@@ -10,6 +10,36 @@ use std::io::{Read, Seek};
 use std::path::Path;
 use zip::ZipArchive;
 
+/// 按纯文本读取正文的扩展名；同时用于判断是否建立纯文本的正文索引。
+const TEXT_EXTENSIONS: [&str; 44] = [
+    "md", "markdown", "txt", "text", "csv", "tsv", "json", "jsonc", "yaml", "yml", "toml", "ini", "cfg", "conf",
+    "log", "xml", "html", "htm", "css", "js", "jsx", "ts", "tsx", "py", "rs", "java", "c", "cpp", "h", "hpp", "go",
+    "sh", "sql", "tex", "bib", "rst", "org", "srt", "vtt", "base", "canvas", "ps1", "bat", "cmd",
+];
+/// 读取纯文本正文的文件大小上限。更大的文件只按文件名搜索。
+pub const MAX_TEXT_FILE_BYTES: u64 = 4 * 1024 * 1024;
+
+/// 扩展名属于可按纯文本读取的类型。只按扩展名判断，不嗅探内容：不是 UTF-8 的文件读取会失败，只能按文件名匹配。
+pub fn is_text_file(path: &Path) -> bool {
+    let extension = path.extension().and_then(|value| value.to_str());
+    match extension {
+        Some(value) => {
+            let lower = value.to_ascii_lowercase();
+            TEXT_EXTENSIONS.contains(&lower.as_str())
+        }
+        None => false,
+    }
+}
+
+/// 扩展名是 Markdown。
+pub fn is_markdown_file(path: &Path) -> bool {
+    let extension = path.extension().and_then(|value| value.to_str());
+    match extension {
+        Some(value) => value.eq_ignore_ascii_case("md") || value.eq_ignore_ascii_case("markdown"),
+        None => false,
+    }
+}
+
 /// 单个文档提取出的文本上限（字节）。超出部分截断，避免极端文件占满内存。
 pub const MAX_TEXT_BYTES: usize = 8 * 1024 * 1024;
 /// 参与解析的文件大小上限。更大的文件只按文件名搜索。
@@ -24,6 +54,8 @@ pub enum DocKind {
     Xlsx,
     Pptx,
     Pdf,
+    /// 纯文本文件。大工作区把它们也放进索引，搜索时不必逐个去网络上读取。
+    Text,
 }
 
 impl DocKind {
@@ -34,7 +66,7 @@ impl DocKind {
             DocKind::Pdf => format!("第 {} 页", pages + 1),
             DocKind::Pptx => format!("第 {} 张", pages + 1),
             DocKind::Docx => format!("第 {} 段", newlines + 1),
-            DocKind::Xlsx => format!("第 {} 行", newlines + 1),
+            DocKind::Xlsx | DocKind::Text => format!("第 {} 行", newlines + 1),
         }
     }
 }
@@ -355,7 +387,7 @@ fn extract_office(path: &Path, kind: DocKind) -> Result<String, String> {
         DocKind::Docx => extract_docx(&mut archive),
         DocKind::Xlsx => extract_xlsx(&mut archive),
         DocKind::Pptx => extract_pptx(&mut archive),
-        DocKind::Pdf => Err("内部错误：PDF 不走 Office 路径。".to_string()),
+        DocKind::Pdf | DocKind::Text => Err("内部错误：该类型不走 Office 路径。".to_string()),
     }
 }
 
@@ -409,8 +441,22 @@ fn truncate_on_boundary(mut text: String, limit: usize) -> String {
     text
 }
 
+/// 读取 UTF-8 纯文本，去掉 BOM。不是 UTF-8 或文件过大时返回错误。
+fn extract_plain_text(path: &Path) -> Result<String, String> {
+    let size = fs::metadata(path).map_err(|error| format!("无法读取：{error}"))?.len();
+    if size > MAX_TEXT_FILE_BYTES {
+        return Err("文件过大，已跳过正文。".to_string());
+    }
+    let bytes = fs::read(path).map_err(|error| format!("无法读取：{error}"))?;
+    let text = String::from_utf8(bytes).map_err(|_| "不是 UTF-8 编码的文本。".to_string())?;
+    Ok(text.strip_prefix('\u{feff}').unwrap_or(&text).to_string())
+}
+
 /// 提取文档正文。文件过大、类型不支持或解析失败时返回错误；扫描件没有文字层时返回空文本。
 pub fn extract_text(path: &Path) -> Result<String, String> {
+    if doc_kind(path).is_none() && is_text_file(path) {
+        return extract_plain_text(path);
+    }
     let kind = doc_kind(path).ok_or_else(|| "不支持的文档类型。".to_string())?;
     let size = fs::metadata(path).map_err(|error| format!("无法读取：{error}"))?.len();
     if size > MAX_DOCUMENT_BYTES {
@@ -418,6 +464,7 @@ pub fn extract_text(path: &Path) -> Result<String, String> {
     }
     let text = match kind {
         DocKind::Pdf => extract_pdf(path)?,
+        DocKind::Text => extract_plain_text(path)?,
         other => extract_office(path, other)?,
     };
     Ok(truncate_on_boundary(text, MAX_TEXT_BYTES))

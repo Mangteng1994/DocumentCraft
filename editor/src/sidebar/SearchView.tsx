@@ -44,6 +44,17 @@ function openFile(file: SearchFile): void {
   void openWithSystem(file.path, file.name);
 }
 
+/** 把秒数说成「刚刚」「N 分钟前」「N 小时前」。 */
+function formatAge(seconds: number): string {
+  if (seconds < 60) {
+    return "刚刚";
+  }
+  if (seconds < 3600) {
+    return `${Math.floor(seconds / 60)} 分钟前`;
+  }
+  return `${Math.floor(seconds / 3600)} 小时前`;
+}
+
 function countMatches(result: SearchResult): number {
   let total = 0;
   for (const file of result.files) {
@@ -257,12 +268,19 @@ export function SearchResults() {
     };
   }, [workspace, trimmed, mode, indexVersion]);
 
+  // 现场遍历超时（工作区很大）：先在后台扫描文件夹，扫描完成后会自动重新搜索。
+  useEffect(() => {
+    if (workspace && result?.needs_scan && !(indexProgress?.running ?? false)) {
+      void startIndexing(workspace);
+    }
+  }, [workspace, result, indexProgress]);
+
   // 搜索期间出现了新增或刚修改的文档（已索引数少于总数且后台没有在建立）时，补做一次增量索引。
-  // 同一个「总数:已索引数」状态只触发一次，避免文档始终无法索引时反复启动。
+  // 同一个「总数:已索引数」状态只触发一次，避免文档始终无法索引时反复启动。大工作区推迟索引，不自动补做。
   const autoStarted = useRef("");
   useEffect(() => {
     const docs = result?.docs;
-    if (!workspace || !docs || mode === "names" || docs.running || docs.indexed >= docs.total) {
+    if (!workspace || !docs || mode === "names" || docs.running || docs.deferred || docs.indexed >= docs.total) {
       return;
     }
     const key = `${workspace}:${docs.total}:${docs.indexed}`;
@@ -280,9 +298,12 @@ export function SearchResults() {
   const fileCount = result?.files.length ?? 0;
   const matchCount = result ? countMatches(result) : 0;
 
+  const scanning = indexProgress?.running === true && indexProgress.phase === "scan";
   let summary = "";
   // 刷新索引进度触发的重新搜索期间保留旧结果和旧摘要，避免闪烁。
-  if (searching && !result) {
+  if (result?.needs_scan || (scanning && !result)) {
+    summary = "这个工作区很大，正在扫描文件夹，完成后会自动搜索。";
+  } else if (searching && !result) {
     summary = "正在搜索…";
   } else if (error) {
     summary = error;
@@ -298,7 +319,10 @@ export function SearchResults() {
   // 文档正文索引的提示：建立中显示进度，建立后说明哪些文档搜不到正文。
   const notes: string[] = [];
   const docs = result?.docs;
-  if (docs && docs.total > 0 && mode !== "names") {
+  if (scanning && indexProgress) {
+    notes.push(`正在扫描文件夹，已发现 ${indexProgress.done.toLocaleString()} 个文件。`);
+  }
+  if (docs && docs.total > 0 && mode !== "names" && !docs.deferred) {
     const running = docs.running || (indexProgress?.running ?? false);
     if (running) {
       const done = indexProgress ? indexProgress.done : docs.indexed;
@@ -315,11 +339,31 @@ export function SearchResults() {
     }
   }
 
+  // 大工作区：说明文件列表来自缓存并提供重新扫描；文档和纯文本索引推迟时提供手动建立的按钮。
+  const showDeferred = Boolean(docs?.deferred) && mode !== "names" && (docs?.total ?? 0) > 0 && (docs?.indexed ?? 0) < (docs?.total ?? 0);
+  const busy = indexProgress?.running === true;
+
   return (
     <div className="dc-search">
       {summary && (
         <div className="dc-search-summary" role="status">
           {summary}
+        </div>
+      )}
+      {result?.large && !result.needs_scan && (
+        <div className="dc-search-note">
+          工作区很大（{result.file_count.toLocaleString()} 个文件），文件列表是 {formatAge(result.scan_age_seconds)}扫描的。
+          <button type="button" className="dc-link-button" disabled={busy} onClick={() => void startIndexing(workspace, { refresh: true })}>
+            重新扫描
+          </button>
+        </div>
+      )}
+      {showDeferred && docs && (
+        <div className="dc-search-note">
+          没有自动建立正文索引：这个工作区很大，有 {docs.total.toLocaleString()} 个 Word、Excel、PowerPoint、PDF 和 Markdown 文档需要读取。现在只能搜到文件名。
+          <button type="button" className="dc-link-button" disabled={busy} onClick={() => void startIndexing(workspace, { manual: true })}>
+            建立正文索引
+          </button>
         </div>
       )}
       {notes.map((note) => (

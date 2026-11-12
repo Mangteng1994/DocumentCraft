@@ -6,9 +6,10 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::{Duration, Instant, UNIX_EPOCH};
 
-use crate::extract::PAGE_BREAK;
-use crate::textindex::{fold_text, indexable, DocEntry, IndexProgress, SearchIndex};
+use crate::extract::{is_text_file, MAX_TEXT_FILE_BYTES, PAGE_BREAK};
+use crate::textindex::{fold_text, indexable, DocEntry, FileRec, IndexProgress, ScanResult, SearchIndex};
 
 /// 单个目录最多列出的条目数，防止误选磁盘根目录时界面卡死。
 const MAX_ENTRIES_PER_DIR: usize = 2000;
@@ -16,12 +17,53 @@ const MAX_ENTRIES_PER_DIR: usize = 2000;
 const MAX_DEPTH: usize = 16;
 const MARKDOWN_EXTENSIONS: [&str; 2] = ["md", "markdown"];
 
+/// 一次性读取整棵目录树的预算：条目数和时间任一用完就放弃，改用按需加载。
+/// 本地的普通工作区远低于这个预算，行为不变；网络共享上的大文件夹会超出。
+const TREE_BUDGET_ENTRIES: usize = 4000;
+const TREE_BUDGET_SECONDS: u64 = 2;
+
 #[derive(Serialize)]
 pub struct TreeNode {
     name: String,
     path: String,
     is_dir: bool,
     children: Vec<TreeNode>,
+    /// 子项是否已读取。按需加载时，没展开过的文件夹为 false，展开时用 list_dir 读取。
+    loaded: bool,
+    /// 文件夹的条目超过单目录上限，只列出了前一部分。
+    truncated: bool,
+    /// 目录树以按需加载模式返回（只对根节点有意义）：只读了顶层，不含 Markdown 的文件夹也会显示。
+    lazy: bool,
+}
+
+impl TreeNode {
+    fn directory(path: &Path) -> TreeNode {
+        let name = path
+            .file_name()
+            .map(|value| value.to_string_lossy().into_owned())
+            .unwrap_or_else(|| path.to_string_lossy().into_owned());
+        TreeNode {
+            name,
+            path: path.to_string_lossy().into_owned(),
+            is_dir: true,
+            children: Vec::new(),
+            loaded: false,
+            truncated: false,
+            lazy: false,
+        }
+    }
+
+    fn file(name: String, path: &Path) -> TreeNode {
+        TreeNode {
+            name,
+            path: path.to_string_lossy().into_owned(),
+            is_dir: false,
+            children: Vec::new(),
+            loaded: true,
+            truncated: false,
+            lazy: false,
+        }
+    }
 }
 
 fn is_markdown(path: &Path) -> bool {
@@ -59,62 +101,126 @@ fn is_empty_dir(path: &Path) -> bool {
     }
 }
 
-fn read_dir_node(path: &Path, depth: usize, show_all: bool) -> Option<TreeNode> {
-    let name = path
-        .file_name()
-        .map(|value| value.to_string_lossy().into_owned())
-        .unwrap_or_else(|| path.to_string_lossy().into_owned());
-    let mut node = TreeNode {
-        name,
-        path: path.to_string_lossy().into_owned(),
-        is_dir: true,
-        children: Vec::new(),
-    };
-    if depth >= MAX_DEPTH {
-        return Some(node);
+/// 读取目录树的预算。网络共享上每读一个目录都有往返延迟，大文件夹读完要几分钟，
+/// 所以超出预算就放弃整棵树的读取，调用方改用按需加载。
+struct Budget {
+    entries_left: usize,
+    deadline: Instant,
+    exceeded: bool,
+}
+
+impl Budget {
+    fn new(entries: usize, seconds: u64) -> Budget {
+        Budget { entries_left: entries, deadline: Instant::now() + Duration::from_secs(seconds), exceeded: false }
     }
-    let entries = fs::read_dir(path).ok()?;
+
+    /// 记一条读取；预算用完后返回 false。
+    fn spend(&mut self) -> bool {
+        if self.exceeded {
+            return false;
+        }
+        self.entries_left = self.entries_left.saturating_sub(1);
+        if self.entries_left == 0 || Instant::now() >= self.deadline {
+            self.exceeded = true;
+        }
+        !self.exceeded
+    }
+}
+
+/// 读取目录下的一层子项，不递归。文件夹原样列出（子项未读取），文件按 show_all 与 Markdown 规则过滤。
+/// 逐项用 `DirEntry::metadata`：Windows 上它直接取目录枚举时带回的属性，不需要再访问一次文件系统，
+/// 在网络共享上比逐个 `symlink_metadata` 快得多。
+fn read_level(path: &Path, show_all: bool) -> Result<TreeNode, String> {
+    let entries = fs::read_dir(path).map_err(|error| format!("无法读取 {}：{error}", path.to_string_lossy()))?;
+    let mut node = TreeNode::directory(path);
     let mut directories = Vec::new();
     let mut files = Vec::new();
-    for entry in entries.flatten().take(MAX_ENTRIES_PER_DIR) {
+    for (index, entry) in entries.flatten().enumerate() {
+        if index >= MAX_ENTRIES_PER_DIR {
+            node.truncated = true;
+            break;
+        }
         let entry_name = entry.file_name().to_string_lossy().into_owned();
         // 隐藏目录（含 .documentcraft 批注库、.git）不进入目录树。
         if entry_name.starts_with('.') {
             continue;
         }
-        let metadata = match fs::symlink_metadata(entry.path()) {
-            Ok(value) => value,
-            Err(_) => continue,
+        let Ok(metadata) = entry.metadata() else {
+            continue;
         };
         if !is_ordinary(&metadata) {
             continue;
         }
         let entry_path = entry.path();
         if metadata.is_dir() {
-            if let Some(child) = read_dir_node(&entry_path, depth + 1, show_all) {
-                // 默认只保留包含 Markdown 的目录，目录树聚焦于可阅读的文档。完全空的目录也保留，
-                // 否则刚新建的文件夹会立刻从目录树消失；显示全部文件时所有目录都保留。
-                if show_all || !child.children.is_empty() || is_empty_dir(&entry_path) {
-                    directories.push(child);
-                }
-            }
+            directories.push(TreeNode::directory(&entry_path));
         } else if show_all || is_markdown(&entry_path) {
-            files.push(TreeNode {
-                name: entry_name,
-                path: entry_path.to_string_lossy().into_owned(),
-                is_dir: false,
-                children: Vec::new(),
-            });
+            files.push(TreeNode::file(entry_name, &entry_path));
         }
     }
     directories.sort_by_key(|item| item.name.to_lowercase());
     files.sort_by_key(|item| item.name.to_lowercase());
     node.children.extend(directories);
     node.children.extend(files);
+    node.loaded = true;
+    Ok(node)
+}
+
+/// 递归读取整棵子树，只保留含 Markdown 的文件夹（`show_all` 时全部保留）。预算用完返回 None。
+fn read_dir_node(path: &Path, depth: usize, show_all: bool, budget: &mut Budget) -> Option<TreeNode> {
+    if budget.exceeded {
+        return None;
+    }
+    let mut node = TreeNode::directory(path);
+    if depth >= MAX_DEPTH {
+        return Some(node);
+    }
+    let entries = fs::read_dir(path).ok()?;
+    let mut directories = Vec::new();
+    let mut files = Vec::new();
+    for (index, entry) in entries.flatten().enumerate() {
+        if index >= MAX_ENTRIES_PER_DIR {
+            node.truncated = true;
+            break;
+        }
+        if !budget.spend() {
+            return None;
+        }
+        let entry_name = entry.file_name().to_string_lossy().into_owned();
+        if entry_name.starts_with('.') {
+            continue;
+        }
+        let Ok(metadata) = entry.metadata() else {
+            continue;
+        };
+        if !is_ordinary(&metadata) {
+            continue;
+        }
+        let entry_path = entry.path();
+        if metadata.is_dir() {
+            if let Some(child) = read_dir_node(&entry_path, depth + 1, show_all, budget) {
+                // 默认只保留包含 Markdown 的目录，目录树聚焦于可阅读的文档。完全空的目录也保留，
+                // 否则刚新建的文件夹会立刻从目录树消失；显示全部文件时所有目录都保留。
+                if show_all || !child.children.is_empty() || is_empty_dir(&entry_path) {
+                    directories.push(child);
+                }
+            } else if budget.exceeded {
+                return None;
+            }
+        } else if show_all || is_markdown(&entry_path) {
+            files.push(TreeNode::file(entry_name, &entry_path));
+        }
+    }
+    directories.sort_by_key(|item| item.name.to_lowercase());
+    files.sort_by_key(|item| item.name.to_lowercase());
+    node.children.extend(directories);
+    node.children.extend(files);
+    node.loaded = depth < MAX_DEPTH;
     Some(node)
 }
 
-/// 列出工作区目录树。默认只包含 Markdown 文件和含 Markdown 的目录；`show_all` 为真时列出全部文件和目录。
+/// 列出工作区目录树。预算内能读完时，默认只包含 Markdown 文件和含 Markdown 的目录（`show_all` 为真时
+/// 列出全部文件和目录）；工作区很大、超出预算时改为按需加载，只返回顶层，`lazy` 为真。
 #[tauri::command]
 pub async fn list_tree(root: String, show_all: Option<bool>) -> Result<TreeNode, String> {
     let show_all = show_all.unwrap_or(false);
@@ -123,7 +229,27 @@ pub async fn list_tree(root: String, show_all: Option<bool>) -> Result<TreeNode,
         if !path.is_dir() {
             return Err(format!("工作区不是文件夹：{root}"));
         }
-        read_dir_node(&path, 0, show_all).ok_or_else(|| format!("无法读取工作区：{root}"))
+        let mut budget = Budget::new(TREE_BUDGET_ENTRIES, TREE_BUDGET_SECONDS);
+        if let Some(tree) = read_dir_node(&path, 0, show_all, &mut budget) {
+            return Ok(tree);
+        }
+        let mut top = read_level(&path, show_all)?;
+        top.lazy = true;
+        Ok(top)
+    });
+    task.await.map_err(|error| error.to_string())?
+}
+
+/// 读取一个文件夹的直接子项，供按需加载模式展开文件夹时使用。
+#[tauri::command]
+pub async fn list_dir(path: String, show_all: Option<bool>) -> Result<TreeNode, String> {
+    let show_all = show_all.unwrap_or(false);
+    let task = tauri::async_runtime::spawn_blocking(move || {
+        let directory = PathBuf::from(&path);
+        if !directory.is_dir() {
+            return Err(format!("不是文件夹：{path}"));
+        }
+        read_level(&directory, show_all)
     });
     task.await.map_err(|error| error.to_string())?
 }
@@ -239,9 +365,7 @@ pub fn remove_markdown(path: String) -> Result<(), String> {
     fs::remove_file(&target).map_err(|error| format!("无法删除 {path}：{error}"))
 }
 
-/// 搜索最多收集的文件数、读取正文的单个文件大小，以及返回的匹配总数和单文件匹配数。
-const MAX_SEARCH_FILES: usize = 20000;
-const MAX_SEARCH_FILE_BYTES: u64 = 4 * 1024 * 1024;
+/// 返回的匹配总数和单文件匹配数。
 const MAX_SEARCH_MATCHES: usize = 500;
 const MAX_MATCHES_PER_FILE: usize = 50;
 /// 匹配前后保留的上下文字符数。
@@ -250,14 +374,6 @@ const SNIPPET_AFTER: usize = 60;
 /// 在文档正文中截取上下文时，向命中位置前后查找行边界的最大字节数。中文每字 3 字节，
 /// 60 个字符约 180 字节，留有余量；限制窗口是为了避免 PDF 中的超长行拖慢截取。
 const SNIPPET_WINDOW_BYTES: usize = 240;
-/// 按纯文本读取正文的扩展名。Word、PDF、Excel 等文档由 textindex 解析后检索，不在其中。
-/// 只按扩展名判断，不嗅探内容：这些文件不是 UTF-8 时读取会失败，只能按文件名匹配。
-const TEXT_EXTENSIONS: [&str; 44] = [
-    "md", "markdown", "txt", "text", "csv", "tsv", "json", "jsonc", "yaml", "yml", "toml", "ini", "cfg", "conf",
-    "log", "xml", "html", "htm", "css", "js", "jsx", "ts", "tsx", "py", "rs", "java", "c", "cpp", "h", "hpp", "go",
-    "sh", "sql", "tex", "bib", "rst", "org", "srt", "vtt", "base", "canvas", "ps1", "bat", "cmd",
-];
-
 /// 搜索范围：全部（文件名 + 正文）、只搜文件名、只搜正文。
 #[derive(Clone, Copy, PartialEq)]
 enum SearchMode {
@@ -319,8 +435,10 @@ pub struct DocStats {
     failed: usize,
     /// 解析成功但没有文字的文档数，多为扫描件。
     no_text: usize,
-    /// 索引正在后台建立。
+    /// 索引正在后台建立（含扫描文件夹的阶段）。
     running: bool,
+    /// 工作区较大，没有自动建立索引，等用户手动触发。
+    deferred: bool,
 }
 
 #[derive(Serialize)]
@@ -329,9 +447,34 @@ pub struct SearchResult {
     /// 达到文件数或匹配总数上限，结果不完整。
     truncated: bool,
     docs: DocStats,
+    /// 现场遍历超时，需要先在后台扫描文件夹；本次没有搜索结果。
+    needs_scan: bool,
+    /// 使用的是大工作区缓存的文件列表。
+    large: bool,
+    /// 参与搜索的文件总数。
+    file_count: usize,
+    /// 使用缓存文件列表时，这份列表是多少秒前扫描的；现场遍历时为 0。
+    scan_age_seconds: u64,
+}
+
+impl SearchResult {
+    fn empty() -> SearchResult {
+        SearchResult { files: Vec::new(), truncated: false, docs: DocStats::default(), needs_scan: false, large: false, file_count: 0, scan_age_seconds: 0 }
+    }
 }
 
 type DocIndex = HashMap<String, Arc<DocEntry>>;
+
+/// 一次搜索用到的索引与工作区状态。
+struct SearchContext<'a> {
+    docs: &'a DocIndex,
+    /// 索引正在后台建立。
+    indexing: bool,
+    /// 大工作区没有自动建立索引，等用户手动触发。
+    deferred: bool,
+    /// 大工作区：Markdown 正文来自索引，不在搜索时现场读取；其他纯文本只能按文件名搜索。
+    large: bool,
+}
 
 /// 逐字符小写，保证小写后的字符序号与原文一一对应，便于截取上下文。
 fn lower_chars(text: &str) -> Vec<char> {
@@ -374,51 +517,90 @@ fn snippet(chars: &[char], start: usize, length: usize) -> (String, String, Stri
     (before.trim_start().to_string(), hit, after.trim_end().to_string())
 }
 
-/// 扩展名属于可按纯文本读取的类型。
-fn is_text_file(path: &Path) -> bool {
-    let extension = path.extension().and_then(|value| value.to_str());
-    match extension {
-        Some(value) => {
-            let lower = value.to_ascii_lowercase();
-            TEXT_EXTENSIONS.contains(&lower.as_str())
-        }
-        None => false,
-    }
+/// 一次扫描最多收集的文件数。网络共享上的大工作区可能有几十万个文件，超出后列表标记为不完整。
+const MAX_SCAN_FILES: usize = 300_000;
+/// 搜索时现场遍历文件夹的时间上限。超出就认为工作区较大，改为后台扫描并缓存文件列表。
+const LIVE_WALK_SECONDS: u64 = 2;
+/// 判定为大工作区的条件：文件数超过阈值、扫描耗时超过阈值，或位于网络路径（`\\服务器\共享`）。
+const LARGE_FILE_COUNT: usize = 20_000;
+const LARGE_SCAN_SECONDS: u64 = 3;
+/// 大工作区的文件列表缓存这么久之后才重新扫描。
+const LARGE_RESCAN_SECONDS: u64 = 30 * 60;
+
+struct WalkOutcome {
+    files: Vec<FileRec>,
+    /// 完整走完。被时间或文件数上限打断时为 false。
+    complete: bool,
+}
+
+fn modified_millis(metadata: &fs::Metadata) -> u64 {
+    metadata
+        .modified()
+        .ok()
+        .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+        .map(|duration| duration.as_millis() as u64)
+        .unwrap_or(0)
 }
 
 /// 收集工作区内的全部文件，规则与目录树一致：跳过隐藏文件和目录、链接和目录联接。
-pub(crate) fn collect_files(path: &Path, depth: usize, files: &mut Vec<PathBuf>) {
-    if depth >= MAX_DEPTH || files.len() >= MAX_SEARCH_FILES {
+/// 文件大小和修改时间取自目录枚举（`DirEntry::metadata`），不为每个文件再访问一次文件系统。
+/// `deadline` 到期或文件数达到 `max_files` 时提前结束；`on_progress` 每发现 500 个文件调用一次。
+fn walk_files(root: &Path, max_files: usize, deadline: Option<Instant>, on_progress: &dyn Fn(usize)) -> WalkOutcome {
+    let mut files = Vec::new();
+    let mut complete = true;
+    walk_directory(root, 0, max_files, deadline, on_progress, &mut files, &mut complete);
+    WalkOutcome { files, complete }
+}
+
+fn walk_directory(
+    path: &Path,
+    depth: usize,
+    max_files: usize,
+    deadline: Option<Instant>,
+    on_progress: &dyn Fn(usize),
+    files: &mut Vec<FileRec>,
+    complete: &mut bool,
+) {
+    if !*complete || depth >= MAX_DEPTH {
         return;
     }
-    let entries = match fs::read_dir(path) {
-        Ok(value) => value,
-        Err(_) => return,
+    if files.len() >= max_files || deadline.is_some_and(|limit| Instant::now() >= limit) {
+        *complete = false;
+        return;
+    }
+    let Ok(entries) = fs::read_dir(path) else {
+        return;
     };
-    let mut children: Vec<PathBuf> = Vec::new();
+    let mut children: Vec<(PathBuf, fs::Metadata)> = Vec::new();
     for entry in entries.flatten().take(MAX_ENTRIES_PER_DIR) {
         let entry_name = entry.file_name().to_string_lossy().into_owned();
         if entry_name.starts_with('.') {
             continue;
         }
-        children.push(entry.path());
-    }
-    children.sort_by_key(|item| item.to_string_lossy().to_lowercase());
-    for child in children {
-        if files.len() >= MAX_SEARCH_FILES {
-            return;
-        }
-        let metadata = match fs::symlink_metadata(&child) {
-            Ok(value) => value,
-            Err(_) => continue,
+        let Ok(metadata) = entry.metadata() else {
+            continue;
         };
         if !is_ordinary(&metadata) {
             continue;
         }
+        children.push((entry.path(), metadata));
+    }
+    children.sort_by_key(|(child, _)| child.to_string_lossy().to_lowercase());
+    for (child, metadata) in children {
         if metadata.is_dir() {
-            collect_files(&child, depth + 1, files);
-        } else {
-            files.push(child);
+            walk_directory(&child, depth + 1, max_files, deadline, on_progress, files, complete);
+            if !*complete {
+                return;
+            }
+            continue;
+        }
+        files.push(FileRec { path: child, size: metadata.len(), mtime: modified_millis(&metadata) });
+        if files.len() % 500 == 0 {
+            on_progress(files.len());
+        }
+        if files.len() >= max_files {
+            *complete = false;
+            return;
         }
     }
 }
@@ -429,7 +611,7 @@ fn read_searchable_text(path: &Path) -> Option<String> {
         return None;
     }
     let metadata = fs::metadata(path).ok()?;
-    if metadata.len() > MAX_SEARCH_FILE_BYTES {
+    if metadata.len() > MAX_TEXT_FILE_BYTES {
         return None;
     }
     let bytes = fs::read(path).ok()?;
@@ -531,17 +713,19 @@ fn search_plain_text(text: &str, needle: &[char], budget: usize) -> (Vec<SearchM
     (matches, more)
 }
 
-fn search_file(path: &Path, needle: &[char], folded: &str, mode: SearchMode, docs: &DocIndex, budget: usize) -> Option<SearchFile> {
+fn search_file(path: &Path, needle: &[char], folded: &str, mode: SearchMode, context: &SearchContext, budget: usize) -> Option<SearchFile> {
     let name = path.file_name()?.to_string_lossy().into_owned();
     let name_match = mode.matches_names() && !find_all(&lower_chars(&name), needle).is_empty();
     let mut matches = Vec::new();
     let mut more = false;
     if mode.matches_content() {
         let key = path.to_string_lossy();
-        if let Some(entry) = docs.get(key.as_ref()) {
+        if let Some(entry) = context.docs.get(key.as_ref()) {
             (matches, more) = search_document(entry, folded, budget);
-        } else if let Some(text) = read_searchable_text(path) {
-            (matches, more) = search_plain_text(&text, needle, budget);
+        } else if !context.large {
+            if let Some(text) = read_searchable_text(path) {
+                (matches, more) = search_plain_text(&text, needle, budget);
+            }
         }
     }
     if !name_match && matches.is_empty() {
@@ -557,15 +741,15 @@ fn search_file(path: &Path, needle: &[char], folded: &str, mode: SearchMode, doc
 }
 
 /// 统计文档正文索引对当前工作区的覆盖情况。
-fn document_stats(paths: &[PathBuf], docs: &DocIndex, running: bool) -> DocStats {
-    let mut stats = DocStats { running, ..DocStats::default() };
-    for path in paths {
-        if indexable(path).is_none() {
+fn document_stats(files: &[FileRec], context: &SearchContext) -> DocStats {
+    let mut stats = DocStats { running: context.indexing, deferred: context.deferred, ..DocStats::default() };
+    for rec in files {
+        if indexable(rec, context.large).is_none() {
             continue;
         }
         stats.total += 1;
-        let key = path.to_string_lossy();
-        if let Some(entry) = docs.get(key.as_ref()) {
+        let key = rec.path.to_string_lossy();
+        if let Some(entry) = context.docs.get(key.as_ref()) {
             stats.indexed += 1;
             if entry.error.is_some() {
                 stats.failed += 1;
@@ -577,32 +761,41 @@ fn document_stats(paths: &[PathBuf], docs: &DocIndex, running: bool) -> DocStats
     stats
 }
 
-fn search_root(root: &Path, query: &str, mode: SearchMode, docs: &DocIndex, indexing: bool) -> SearchResult {
+/// 在给定的文件列表中搜索。
+fn search_files(files: &[FileRec], query: &str, mode: SearchMode, context: &SearchContext) -> SearchResult {
     let trimmed = query.trim();
     let needle = lower_chars(trimmed);
     let folded = fold_text(trimmed);
-    let mut paths = Vec::new();
-    collect_files(root, 0, &mut paths);
-    let mut truncated = paths.len() >= MAX_SEARCH_FILES;
-    let mut files = Vec::new();
+    let mut truncated = false;
+    let mut found = Vec::new();
     let mut total = 0;
-    for path in &paths {
+    for rec in files {
         if total >= MAX_SEARCH_MATCHES {
             truncated = true;
             break;
         }
-        if let Some(file) = search_file(path, &needle, &folded, mode, docs, MAX_SEARCH_MATCHES - total) {
+        if let Some(file) = search_file(&rec.path, &needle, &folded, mode, context, MAX_SEARCH_MATCHES - total) {
             total += file.matches.len();
-            files.push(file);
+            found.push(file);
         }
     }
-    let stats = if mode.matches_content() { document_stats(&paths, docs, indexing) } else { DocStats::default() };
-    SearchResult { files, truncated, docs: stats }
+    let stats = if mode.matches_content() { document_stats(files, context) } else { DocStats::default() };
+    SearchResult { files: found, truncated, docs: stats, needs_scan: false, large: context.large, file_count: files.len(), scan_age_seconds: 0 }
+}
+
+/// 现场遍历工作区后搜索，仅供测试使用；正式路径见 `search_workspace`。
+#[cfg(test)]
+fn search_root(root: &Path, query: &str, mode: SearchMode, docs: &DocIndex, indexing: bool) -> SearchResult {
+    let walked = walk_files(root, MAX_SCAN_FILES, None, &|_| {});
+    search_files(&walked.files, query, mode, &SearchContext { docs, indexing, deferred: false, large: false })
 }
 
 /// 在工作区中搜索，不区分大小写，结果按文件路径排序。mode 取 `all`（文件名 + 正文）、
 /// `names`（只搜文件名，含全部文件类型）、`text`（只搜正文）。正文包括纯文本文件和已建立索引的
 /// Word、Excel、PowerPoint、PDF；索引未完成时只覆盖已索引的部分，进度见返回值的 docs。
+///
+/// 小工作区每次现场遍历；大工作区（网络共享、文件很多）使用后台扫描缓存的文件列表。现场遍历超过
+/// 时间上限时返回 `needs_scan`，前端据此启动后台扫描，扫描完成后再搜索。
 #[tauri::command]
 pub async fn search_workspace(
     index: tauri::State<'_, Arc<SearchIndex>>,
@@ -612,28 +805,73 @@ pub async fn search_workspace(
 ) -> Result<SearchResult, String> {
     let mode = SearchMode::parse(&mode)?;
     if query.trim().is_empty() {
-        return Ok(SearchResult { files: Vec::new(), truncated: false, docs: DocStats::default() });
+        return Ok(SearchResult::empty());
     }
+    let scan = index.scan_snapshot(&root);
     let (docs, indexing) = index.snapshot(&root);
+    let deferred = index.is_deferred(&root);
     let task = tauri::async_runtime::spawn_blocking(move || {
         let path = PathBuf::from(&root);
         if !path.is_dir() {
             return Err(format!("工作区不是文件夹：{root}"));
         }
-        Ok(search_root(&path, &query, mode, &docs, indexing))
+        if let Some(cached) = scan.as_ref().filter(|cached| cached.large) {
+            let context = SearchContext { docs: &docs, indexing, deferred, large: true };
+            let mut result = search_files(&cached.files, &query, mode, &context);
+            result.truncated |= cached.truncated;
+            result.scan_age_seconds = cached.scanned_at.elapsed().as_secs();
+            return Ok(result);
+        }
+        let deadline = Instant::now() + Duration::from_secs(LIVE_WALK_SECONDS);
+        let walked = walk_files(&path, MAX_SCAN_FILES, Some(deadline), &|_| {});
+        if !walked.complete {
+            return Ok(SearchResult { needs_scan: true, ..SearchResult::empty() });
+        }
+        let context = SearchContext { docs: &docs, indexing, deferred, large: false };
+        Ok(search_files(&walked.files, &query, mode, &context))
     });
     task.await.map_err(|error| error.to_string())?
 }
 
-/// 在后台建立或增量更新工作区的文档正文索引，进度通过 `search-index` 事件发给前端。
-/// 已有任务在运行时直接返回。文档很多时首次建立可能持续数分钟，期间搜索仍可使用。
+fn scan_progress(root: &str, found: usize, running: bool) -> IndexProgress {
+    IndexProgress { root: root.to_string(), phase: "scan", done: found, total: 0, failed: 0, running }
+}
+
+/// 取工作区的文件列表：大工作区的缓存在有效期内直接复用（`refresh` 为真时强制重新扫描），否则重新扫描并报告进度。
+fn ensure_scan(index: &SearchIndex, root: &str, path: &Path, refresh: bool, report: &(dyn Fn(IndexProgress) + Sync)) -> Arc<ScanResult> {
+    if let Some(existing) = index.scan_snapshot(root) {
+        if !refresh && existing.large && existing.scanned_at.elapsed() < Duration::from_secs(LARGE_RESCAN_SECONDS) {
+            return existing;
+        }
+    }
+    let started = Instant::now();
+    report(scan_progress(root, 0, true));
+    let on_progress = |found: usize| report(scan_progress(root, found, true));
+    let walked = walk_files(path, MAX_SCAN_FILES, None, &on_progress);
+    let large = root.starts_with(r"\\") || walked.files.len() > LARGE_FILE_COUNT || started.elapsed() > Duration::from_secs(LARGE_SCAN_SECONDS);
+    let found = walked.files.len();
+    let scan = Arc::new(ScanResult { files: walked.files, scanned_at: Instant::now(), large, truncated: !walked.complete });
+    index.store_scan(root, Arc::clone(&scan));
+    report(scan_progress(root, found, false));
+    scan
+}
+
+/// 在后台准备搜索：先扫描文件列表，再为 Word、Excel、PowerPoint、PDF 建立或增量更新正文索引。
+/// 进度通过 `search-index` 事件发给前端（phase 为 scan 或 index）。已有任务在运行时直接返回。
+///
+/// 大工作区（网络共享、文件很多）读取全部文档代价很高，默认只扫描、不自动建立文档索引，记为「已推迟」；
+/// 用户确认后以 `manual` 为真再调用才建立。
 #[tauri::command]
 pub async fn index_workspace(
     app: tauri::AppHandle,
     index: tauri::State<'_, Arc<SearchIndex>>,
     root: String,
+    manual: Option<bool>,
+    refresh: Option<bool>,
 ) -> Result<(), String> {
     use tauri::{Emitter, Manager};
+    let manual = manual.unwrap_or(false);
+    let refresh = refresh.unwrap_or(false);
     let cache_root = app
         .path()
         .app_data_dir()
@@ -645,13 +883,25 @@ pub async fn index_workspace(
         if !path.is_dir() {
             return Err(format!("工作区不是文件夹：{root}"));
         }
-        let mut files = Vec::new();
-        collect_files(&path, 0, &mut files);
+        if !index.begin(&root) {
+            return Ok(());
+        }
         let emitter = app.clone();
         let report = move |progress: IndexProgress| {
             let _ = emitter.emit("search-index", progress);
         };
-        index.run(&root, &files, &cache_root, &report);
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let scan = ensure_scan(&index, &root, &path, refresh, &report);
+            if scan.large && !manual {
+                index.finish_deferred(&root, true);
+                report(IndexProgress { root: root.clone(), phase: "index", done: 0, total: 0, failed: 0, running: false });
+                return;
+            }
+            index.build(&root, &scan.files, scan.large, &cache_root, &report);
+        }));
+        if outcome.is_err() {
+            index.abort(&root);
+        }
         Ok(())
     });
     task.await.map_err(|error| error.to_string())?
@@ -676,7 +926,7 @@ mod tests {
         fs::write(root.join("说明.txt"), "x").unwrap();
         fs::write(root.join("子目录").join("笔记.markdown"), "# 笔记\n").unwrap();
         fs::write(root.join(".hidden").join("隐藏.md"), "# 隐藏\n").unwrap();
-        let tree = read_dir_node(&root, 0, false).unwrap();
+        let tree = read_dir_node(&root, 0, false, &mut Budget::new(TREE_BUDGET_ENTRIES, TREE_BUDGET_SECONDS)).unwrap();
         let names: Vec<&str> = tree.children.iter().map(|node| node.name.as_str()).collect();
         assert_eq!(names, vec!["子目录", "报告.md"]);
         let folder = &tree.children[0];
@@ -691,7 +941,7 @@ mod tests {
         fs::write(root.join("说明.txt"), "x").unwrap();
         fs::write(root.join(".hidden").join("隐藏.md"), "# 隐藏
 ").unwrap();
-        let tree = read_dir_node(&root, 0, true).unwrap();
+        let tree = read_dir_node(&root, 0, true, &mut Budget::new(TREE_BUDGET_ENTRIES, TREE_BUDGET_SECONDS)).unwrap();
         let names: Vec<&str> = tree.children.iter().map(|node| node.name.as_str()).collect();
         assert_eq!(names, vec!["子目录", "说明.txt"]);
         assert_eq!(tree.children[0].children.len(), 1);
@@ -828,22 +1078,21 @@ mod tests {
         let query = std::env::var("DOCUMENTCRAFT_QUERY").expect("需要设置 DOCUMENTCRAFT_QUERY");
         let root = PathBuf::from(&workspace);
         let cache_root = std::env::temp_dir().join(format!("documentcraft-real-cache-{}", std::process::id()));
-        let mut files = Vec::new();
-        collect_files(&root, 0, &mut files);
+        let files = walk_files(&root, MAX_SCAN_FILES, None, &|_| {}).files;
         let index = SearchIndex::default();
         let last = std::sync::Mutex::new(String::new());
         let report = |progress: IndexProgress| {
             *last.lock().unwrap() = format!("{}/{}，失败 {}", progress.done, progress.total, progress.failed);
         };
         let started = std::time::Instant::now();
-        index.run(&workspace, &files, &cache_root, &report);
+        index.run(&workspace, &files, false, &cache_root, &report);
         println!("首次建立索引：{:?}（{}）", started.elapsed(), last.lock().unwrap());
         let started = std::time::Instant::now();
-        index.run(&workspace, &files, &cache_root, &report);
+        index.run(&workspace, &files, false, &cache_root, &report);
         println!("二次更新（全部命中内存）：{:?}", started.elapsed());
         let restarted = SearchIndex::default();
         let started = std::time::Instant::now();
-        restarted.run(&workspace, &files, &cache_root, &report);
+        restarted.run(&workspace, &files, false, &cache_root, &report);
         println!("重启后从缓存恢复：{:?}", started.elapsed());
         let (docs, _) = restarted.snapshot(&workspace);
         let memory: usize = docs.values().map(|entry| entry.text.len() + entry.lower.len()).sum();
@@ -858,6 +1107,176 @@ mod tests {
         }
         println!("覆盖：共 {} 个文档，已索引 {}，失败 {}，无文字 {}", result.docs.total, result.docs.indexed, result.docs.failed, result.docs.no_text);
         let _ = fs::remove_dir_all(&cache_root);
+    }
+
+    /// 手动验证大工作区（如网络共享）的目录树打开耗时：
+    /// `DOCUMENTCRAFT_WORKSPACE=文件夹 cargo test real_large_tree -- --ignored --nocapture`。
+    #[test]
+    #[ignore]
+    fn real_large_tree_opens_quickly() {
+        let workspace = std::env::var("DOCUMENTCRAFT_WORKSPACE").expect("需要设置 DOCUMENTCRAFT_WORKSPACE");
+        let root = PathBuf::from(&workspace);
+        let started = Instant::now();
+        let mut budget = Budget::new(TREE_BUDGET_ENTRIES, TREE_BUDGET_SECONDS);
+        let full = read_dir_node(&root, 0, false, &mut budget);
+        println!("整树读取：{:?}，预算用尽 {}，得到完整树 {}", started.elapsed(), budget.exceeded, full.is_some());
+        let started = Instant::now();
+        let top = read_level(&root, false).unwrap();
+        println!("顶层一层：{:?}，{} 项（文件夹 {}）", started.elapsed(), top.children.len(), top.children.iter().filter(|node| node.is_dir).count());
+        if let Some(first) = top.children.iter().find(|node| node.is_dir) {
+            let started = Instant::now();
+            let level = read_level(Path::new(&first.path), false).unwrap();
+            println!("展开「{}」：{:?}，{} 项，截断 {}", first.name, started.elapsed(), level.children.len(), level.truncated);
+        }
+        let started = Instant::now();
+        let walked = walk_files(&root, MAX_SCAN_FILES, Some(Instant::now() + Duration::from_secs(60)), &|_| {});
+        println!("60 秒内扫描文件列表：{:?}，发现 {} 个文件，是否走完 {}", started.elapsed(), walked.files.len(), walked.complete);
+    }
+
+    /// 手动验证大工作区的完整扫描与按文件名搜索（会完整遍历一遍，网络共享上需要几分钟）：
+    /// `DOCUMENTCRAFT_WORKSPACE=文件夹 DOCUMENTCRAFT_QUERY=关键词 cargo test real_large_scan -- --ignored --nocapture`。
+    #[test]
+    #[ignore]
+    fn real_large_scan_and_name_search() {
+        let workspace = std::env::var("DOCUMENTCRAFT_WORKSPACE").expect("需要设置 DOCUMENTCRAFT_WORKSPACE");
+        let query = std::env::var("DOCUMENTCRAFT_QUERY").expect("需要设置 DOCUMENTCRAFT_QUERY");
+        let root = PathBuf::from(&workspace);
+        let index = SearchIndex::default();
+        let last = std::sync::Mutex::new(0usize);
+        let report = |progress: IndexProgress| {
+            *last.lock().unwrap() = progress.done;
+        };
+        let started = Instant::now();
+        let scan = ensure_scan(&index, &workspace, &root, false, &report);
+        println!("完整扫描：{:?}，{} 个文件，大工作区 {}，列表不完整 {}", started.elapsed(), scan.files.len(), scan.large, scan.truncated);
+        let docs = scan.files.iter().filter(|rec| indexable(rec, false).is_some()).count();
+        let texts = scan.files.iter().filter(|rec| indexable(rec, true).is_some()).count() - docs;
+        println!("其中可建立正文索引的文档 {docs} 个，纯文本文件 {texts} 个");
+        let empty: DocIndex = HashMap::new();
+        let context = SearchContext { docs: &empty, indexing: false, deferred: true, large: true };
+        let started = Instant::now();
+        let names = search_files(&scan.files, &query, SearchMode::Names, &context);
+        println!("按文件名搜索「{query}」：{:?}，{} 个文件", started.elapsed(), names.files.len());
+        let started = Instant::now();
+        let text = search_files(&scan.files, &query, SearchMode::Text, &context);
+        println!("按正文搜索（未建索引）：{:?}，{} 个文件，覆盖 {}/{}", started.elapsed(), text.files.len(), text.docs.indexed, text.docs.total);
+    }
+
+    #[test]
+    fn tree_switches_to_lazy_loading_when_the_budget_runs_out() {
+        let root = scratch("lazy");
+        for index in 0..6 {
+            fs::write(root.join("子目录").join(format!("文件{index}.txt")), "x").unwrap();
+        }
+        fs::write(root.join("子目录").join("笔记.md"), "# 笔记\n").unwrap();
+        fs::write(root.join("说明.txt"), "x").unwrap();
+
+        // 预算够用：整棵树读完，只含 Markdown 的文件夹（不含 txt），所有文件夹都已读取。
+        let mut enough = Budget::new(1000, 60);
+        let full = read_dir_node(&root, 0, false, &mut enough).unwrap();
+        assert!(!enough.exceeded && full.loaded && !full.lazy);
+
+        // 预算太小：放弃整棵树，按需加载。只读一层，文件夹未读取，不含 Markdown 的文件夹也列出。
+        let mut tiny = Budget::new(3, 60);
+        assert!(read_dir_node(&root, 0, false, &mut tiny).is_none());
+        assert!(tiny.exceeded);
+        let top = read_level(&root, false).unwrap();
+        let names: Vec<&str> = top.children.iter().map(|node| node.name.as_str()).collect();
+        assert_eq!(names, vec!["子目录"], "默认只显示 Markdown，txt 被过滤");
+        assert!(top.loaded && !top.children[0].loaded && top.children[0].children.is_empty());
+        let inner = read_level(&root.join("子目录"), false).unwrap();
+        let inner_names: Vec<&str> = inner.children.iter().map(|node| node.name.as_str()).collect();
+        assert_eq!(inner_names, vec!["空目录", "笔记.md"]);
+        assert!(inner.children.iter().find(|node| node.name == "空目录").is_some_and(|node| !node.loaded));
+        let all = read_level(&root, true).unwrap();
+        assert_eq!(all.children.iter().map(|node| node.name.as_str()).collect::<Vec<_>>(), vec!["子目录", "说明.txt"]);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_directory_with_too_many_entries_is_listed_partially_and_flagged() {
+        let root = scratch("many");
+        for index in 0..(MAX_ENTRIES_PER_DIR + 30) {
+            fs::write(root.join(format!("n{index}.md")), "x").unwrap();
+        }
+        let level = read_level(&root, false).unwrap();
+        assert!(level.truncated);
+        assert!(level.children.len() <= MAX_ENTRIES_PER_DIR);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn file_walk_stops_at_the_cap_and_the_deadline() {
+        let root = scratch("walk");
+        for index in 0..5 {
+            fs::write(root.join(format!("文件{index}.txt")), "x").unwrap();
+        }
+        let capped = walk_files(&root, 3, None, &|_| {});
+        assert_eq!(capped.files.len(), 3);
+        assert!(!capped.complete);
+        let expired = walk_files(&root, 100, Some(Instant::now() - Duration::from_secs(1)), &|_| {});
+        assert!(!expired.complete && expired.files.is_empty());
+        let full = walk_files(&root, 100, None, &|_| {});
+        assert!(full.complete);
+        assert_eq!(full.files.len(), 5);
+        assert!(full.files.iter().all(|rec| rec.size == 1));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn large_workspaces_search_markdown_through_the_index_instead_of_reading_files() {
+        let root = scratch("largetext");
+        let note = root.join("记录.md");
+        let other = root.join("数据.txt");
+        fs::write(&note, "第一行\n流速 0.5\n").unwrap();
+        fs::write(&other, "流速").unwrap();
+        let walked = walk_files(&root, MAX_SCAN_FILES, None, &|_| {}).files;
+        let empty: DocIndex = HashMap::new();
+        let large = SearchContext { docs: &empty, indexing: false, deferred: true, large: true };
+        // 大工作区且没有索引：不现场读取文件，正文搜不到；统计里 Markdown 算「未索引」，其他纯文本不在索引范围。
+        let unindexed = search_files(&walked, "流速", SearchMode::Text, &large);
+        assert!(unindexed.files.is_empty());
+        assert_eq!((unindexed.docs.total, unindexed.docs.indexed, unindexed.docs.deferred), (1, 0, true));
+        // 小工作区仍然现场读取，Markdown 和 txt 都能搜到，总是最新。
+        let small = SearchContext { docs: &empty, indexing: false, deferred: false, large: false };
+        assert_eq!(search_files(&walked, "流速", SearchMode::Text, &small).files.len(), 2);
+        assert_eq!(search_files(&walked, "流速", SearchMode::Text, &small).docs.total, 0);
+        // 手动建立索引后，Markdown 从索引里查，位置按行；txt 仍然搜不到正文。
+        let mut docs: DocIndex = HashMap::new();
+        let text = "第一行\n流速 0.5\n";
+        let entry = DocEntry { kind: crate::extract::DocKind::Text, lower: fold_text(text), text: text.to_string(), error: None };
+        docs.insert(note.to_string_lossy().into_owned(), Arc::new(entry));
+        let indexed_context = SearchContext { docs: &docs, indexing: false, deferred: false, large: true };
+        let found = search_files(&walked, "流速", SearchMode::Text, &indexed_context);
+        assert_eq!(found.files.len(), 1);
+        assert_eq!(found.files[0].matches[0].locator, "第 2 行");
+        assert_eq!((found.docs.total, found.docs.indexed), (1, 1));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn network_workspaces_are_large_and_their_scan_is_cached() {
+        let root = scratch("scan");
+        fs::write(root.join("a.docx"), "x").unwrap();
+        let index = SearchIndex::default();
+        let report = |_: IndexProgress| {};
+        // 网络路径（以两个反斜杠开头）直接视为大工作区；缓存有效期内复用同一份扫描结果。
+        let network = r"\\服务器\共享\科研部";
+        let first = ensure_scan(&index, network, &root, false, &report);
+        assert!(first.large && first.files.len() == 1);
+        let second = ensure_scan(&index, network, &root, false, &report);
+        assert!(Arc::ptr_eq(&first, &second));
+        // 本地的小工作区每次都重新扫描，改动立即可见。
+        let local = root.to_string_lossy().into_owned();
+        let scanned = ensure_scan(&index, &local, &root, false, &report);
+        assert!(!scanned.large);
+        fs::write(root.join("b.docx"), "x").unwrap();
+        assert_eq!(ensure_scan(&index, &local, &root, false, &report).files.len(), 2);
+        // 大工作区不自动建立文档索引：记为推迟，手动建立后清除。
+        assert!(index.begin(network));
+        index.finish_deferred(network, true);
+        assert!(index.is_deferred(network));
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]

@@ -12,9 +12,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::UNIX_EPOCH;
+use std::time::Instant;
 
-use crate::extract::{doc_kind, extract_text, DocKind, MAX_DOCUMENT_BYTES};
+use crate::extract::{doc_kind, extract_text, is_markdown_file, DocKind, MAX_DOCUMENT_BYTES, MAX_TEXT_FILE_BYTES};
 
 /// 解析文档时最多同时使用的线程数。
 const MAX_WORKERS: usize = 4;
@@ -60,32 +60,43 @@ struct CacheFile {
     error: Option<String>,
 }
 
-/// 一个可索引文档的文件信息。
-pub struct Indexable {
-    pub kind: DocKind,
+/// 工作区扫描得到的一个文件。大小和修改时间取自目录枚举，不需要再逐个访问文件系统，
+/// 网络共享上这样做比对每个文件再 stat 一次快得多。
+#[derive(Clone)]
+pub struct FileRec {
+    pub path: PathBuf,
     pub size: u64,
     /// 修改时间（毫秒）。
     pub mtime: u64,
 }
 
-/// 判断文件是否参与正文索引：支持的类型、不是 Office 的 `~$` 锁文件、大小在上限内。
-pub fn indexable(path: &Path) -> Option<Indexable> {
-    let kind = doc_kind(path)?;
-    let name = path.file_name()?.to_string_lossy();
+/// 判断文件是否参与正文索引并返回类型：Word、Excel、PowerPoint、PDF（不是 Office 的 `~$` 锁文件，
+/// 大小在上限内）；`include_markdown` 为真时 Markdown 文件也参与。小工作区的 Markdown 和其他纯文本在搜索时
+/// 现场读取、总是最新；大工作区不能每次搜索都去网络上读成千上万个文件，所以把 Markdown 放进索引。
+/// 大工作区里 txt、csv、代码等其他纯文本通常数量极多（几十万个），不索引，只能按文件名搜索。
+pub fn indexable(rec: &FileRec, include_markdown: bool) -> Option<DocKind> {
+    let name = rec.path.file_name()?.to_string_lossy();
     if name.starts_with("~$") {
         return None;
     }
-    let metadata = fs::metadata(path).ok()?;
-    if metadata.len() > MAX_DOCUMENT_BYTES {
-        return None;
+    if let Some(kind) = doc_kind(&rec.path) {
+        return (rec.size <= MAX_DOCUMENT_BYTES).then_some(kind);
     }
-    let mtime = metadata
-        .modified()
-        .ok()
-        .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
-        .map(|duration| duration.as_millis() as u64)
-        .unwrap_or(0);
-    Some(Indexable { kind, size: metadata.len(), mtime })
+    if include_markdown && is_markdown_file(&rec.path) && rec.size <= MAX_TEXT_FILE_BYTES {
+        return Some(DocKind::Text);
+    }
+    None
+}
+
+/// 一次工作区扫描的结果，供搜索复用。
+pub struct ScanResult {
+    pub files: Vec<FileRec>,
+    pub scanned_at: Instant,
+    /// 工作区较大（网络共享、文件很多或扫描很慢）：搜索使用这份缓存的文件列表而不是每次重新遍历，
+    /// 也不自动建立文档正文索引。
+    pub large: bool,
+    /// 文件数达到上限，列表不完整。
+    pub truncated: bool,
 }
 
 /// FNV-1a 64 位哈希。缓存目录和文件名依赖它，必须跨版本稳定，所以不用标准库的 DefaultHasher。
@@ -110,6 +121,8 @@ fn cache_name(path: &str) -> String {
 #[derive(Clone, Serialize)]
 pub struct IndexProgress {
     pub root: String,
+    /// `scan`：扫描文件夹，done 是已发现的文件数，total 为 0；`index`：解析文档。
+    pub phase: &'static str,
     pub done: usize,
     pub total: usize,
     pub failed: usize,
@@ -126,6 +139,9 @@ struct StoredEntry {
 struct RootState {
     entries: HashMap<String, StoredEntry>,
     running: bool,
+    scan: Option<Arc<ScanResult>>,
+    /// 工作区较大，没有自动建立文档索引，等用户手动触发。
+    deferred: bool,
 }
 
 /// 全部工作区的内存索引，作为 Tauri 托管状态使用。
@@ -148,7 +164,7 @@ impl SearchIndex {
     }
 
     /// 标记开始建立索引。已有任务在运行时返回 false。
-    fn begin(&self, root: &str) -> bool {
+    pub fn begin(&self, root: &str) -> bool {
         let mut roots = self.roots.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         let state = roots.entry(root_key(root)).or_default();
         if state.running {
@@ -175,36 +191,62 @@ impl SearchIndex {
         let state = roots.entry(root_key(root)).or_default();
         state.entries = entries;
         state.running = false;
+        state.deferred = false;
     }
 
     /// 异常退出时释放运行标记，避免之后再也无法建立索引。
-    fn abort(&self, root: &str) {
+    pub fn abort(&self, root: &str) {
         let mut roots = self.roots.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         if let Some(state) = roots.get_mut(&root_key(root)) {
             state.running = false;
         }
     }
 
+    /// 取最近一次扫描的结果。
+    pub fn scan_snapshot(&self, root: &str) -> Option<Arc<ScanResult>> {
+        let roots = self.roots.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        roots.get(&root_key(root)).and_then(|state| state.scan.clone())
+    }
+
+    pub fn store_scan(&self, root: &str, scan: Arc<ScanResult>) {
+        let mut roots = self.roots.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        roots.entry(root_key(root)).or_default().scan = Some(scan);
+    }
+
+    /// 是否因工作区较大而没有自动建立文档索引。
+    pub fn is_deferred(&self, root: &str) -> bool {
+        let roots = self.roots.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        roots.get(&root_key(root)).is_some_and(|state| state.deferred)
+    }
+
+    /// 记录是否推迟文档索引，并释放运行标记。
+    pub fn finish_deferred(&self, root: &str, deferred: bool) {
+        let mut roots = self.roots.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let state = roots.entry(root_key(root)).or_default();
+        state.deferred = deferred;
+        state.running = false;
+    }
+
     /// 建立或增量更新工作区的文档索引。返回 false 表示已有任务在运行，本次未执行。
     /// `files` 是工作区内的全部文件；`cache_root` 是缓存根目录；`report` 接收进度。
-    pub fn run(&self, root: &str, files: &[PathBuf], cache_root: &Path, report: &(dyn Fn(IndexProgress) + Sync)) -> bool {
+    /// 正式路径在 `index_workspace` 中分步调用 begin、build；这里把三步合在一起，供测试使用。
+    #[cfg(test)]
+    pub fn run(&self, root: &str, files: &[FileRec], include_markdown: bool, cache_root: &Path, report: &(dyn Fn(IndexProgress) + Sync)) -> bool {
         if !self.begin(root) {
             return false;
         }
-        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.build(root, files, cache_root, report)));
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.build(root, files, include_markdown, cache_root, report)));
         if outcome.is_err() {
             self.abort(root);
         }
         true
     }
 
-    fn build(&self, root: &str, files: &[PathBuf], cache_root: &Path, report: &(dyn Fn(IndexProgress) + Sync)) {
-        let documents: Vec<(PathBuf, Indexable)> = files
-            .iter()
-            .filter_map(|path| indexable(path).map(|info| (path.clone(), info)))
-            .collect();
+    /// 解析 `files` 中的文档并更新索引。调用前须已 `begin`；结束时释放运行标记。
+    pub fn build(&self, root: &str, files: &[FileRec], include_markdown: bool, cache_root: &Path, report: &(dyn Fn(IndexProgress) + Sync)) {
+        let documents: Vec<(&FileRec, DocKind)> = files.iter().filter_map(|rec| indexable(rec, include_markdown).map(|kind| (rec, kind))).collect();
         let total = documents.len();
-        let progress = |done: usize, failed: usize, running: bool| IndexProgress { root: root.to_string(), done, total, failed, running };
+        let progress = |done: usize, failed: usize, running: bool| IndexProgress { root: root.to_string(), phase: "index", done, total, failed, running };
         report(progress(0, 0, true));
 
         let cache_dir = cache_root.join(format!("{:016x}", stable_hash(&root_key(root))));
@@ -223,16 +265,16 @@ impl SearchIndex {
                     if index >= documents.len() {
                         break;
                     }
-                    let (path, info) = &documents[index];
-                    let key = path.to_string_lossy().into_owned();
-                    let entry = load_entry(&key, path, info, &previous, &cache_dir);
+                    let (rec, kind) = &documents[index];
+                    let key = rec.path.to_string_lossy().into_owned();
+                    let entry = load_entry(&key, rec, *kind, &previous, &cache_dir);
                     if entry.error.is_some() {
                         failed.fetch_add(1, Ordering::SeqCst);
                     }
                     fresh
                         .lock()
                         .unwrap_or_else(|poisoned| poisoned.into_inner())
-                        .insert(key, StoredEntry { mtime: info.mtime, size: info.size, entry });
+                        .insert(key, StoredEntry { mtime: rec.mtime, size: rec.size, entry });
                     let finished = done.fetch_add(1, Ordering::SeqCst) + 1;
                     if finished % 4 == 0 || finished == total {
                         report(progress(finished, failed.load(Ordering::SeqCst), finished < total));
@@ -251,28 +293,28 @@ impl SearchIndex {
 /// 取得一个文档的索引项：内存中未过期的直接复用，其次读缓存，最后才解析原文件。
 fn load_entry(
     key: &str,
-    path: &Path,
-    info: &Indexable,
+    rec: &FileRec,
+    kind: DocKind,
     previous: &HashMap<String, (u64, u64, Arc<DocEntry>)>,
     cache_dir: &Path,
 ) -> Arc<DocEntry> {
     if let Some((mtime, size, entry)) = previous.get(key) {
-        if *mtime == info.mtime && *size == info.size {
+        if *mtime == rec.mtime && *size == rec.size {
             return Arc::clone(entry);
         }
     }
     let cache_path = cache_dir.join(cache_name(key));
     if let Some(cached) = read_cache(&cache_path) {
-        if cached.path.eq_ignore_ascii_case(key) && cached.mtime == info.mtime && cached.size == info.size {
-            return Arc::new(DocEntry::new(info.kind, cached.text, cached.error));
+        if cached.path.eq_ignore_ascii_case(key) && cached.mtime == rec.mtime && cached.size == rec.size {
+            return Arc::new(DocEntry::new(kind, cached.text, cached.error));
         }
     }
-    let (text, error) = match extract_text(path) {
+    let (text, error) = match extract_text(&rec.path) {
         Ok(text) => (text, None),
         Err(message) => (String::new(), Some(message)),
     };
-    write_cache(&cache_path, &CacheFile { path: key.to_string(), mtime: info.mtime, size: info.size, text: text.clone(), error: error.clone() });
-    Arc::new(DocEntry::new(info.kind, text, error))
+    write_cache(&cache_path, &CacheFile { path: key.to_string(), mtime: rec.mtime, size: rec.size, text: text.clone(), error: error.clone() });
+    Arc::new(DocEntry::new(kind, text, error))
 }
 
 fn read_cache(path: &Path) -> Option<CacheFile> {
@@ -349,7 +391,15 @@ mod tests {
         fs::write(workspace.join("~$报告.docx"), "lock").unwrap();
         fs::write(workspace.join("坏.docx"), "not a zip").unwrap();
         fs::write(workspace.join("说明.txt"), "x").unwrap();
-        let files = vec![first.clone(), workspace.join("~$报告.docx"), workspace.join("坏.docx"), workspace.join("说明.txt")];
+        let record = |path: &Path| {
+            let metadata = fs::metadata(path).unwrap();
+            let mtime = metadata.modified().unwrap().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as u64;
+            FileRec { path: path.to_path_buf(), size: metadata.len(), mtime }
+        };
+        let files: Vec<FileRec> = [first.clone(), workspace.join("~$报告.docx"), workspace.join("坏.docx"), workspace.join("说明.txt")]
+            .iter()
+            .map(|path| record(path))
+            .collect();
         let root = workspace.to_string_lossy().into_owned();
         let index = SearchIndex::default();
         let finished = AtomicBool::new(false);
@@ -359,7 +409,7 @@ mod tests {
             }
         };
 
-        assert!(index.run(&root, &files, &cache_root, &report));
+        assert!(index.run(&root, &files, false, &cache_root, &report));
         assert!(finished.load(Ordering::SeqCst));
         let (entries, running) = index.snapshot(&root);
         assert!(!running);
@@ -380,17 +430,18 @@ mod tests {
         let tampered = fs::read_to_string(&cache_file).unwrap().replace("流速 0.5", "缓存 0.5");
         fs::write(&cache_file, tampered).unwrap();
         let restarted = SearchIndex::default();
-        assert!(restarted.run(&root, &files, &cache_root, &report));
+        assert!(restarted.run(&root, &files, false, &cache_root, &report));
         assert_eq!(restarted.snapshot(&root).0[&key].text, "缓存 0.5 m/s\n");
 
         // 文件修改后缓存过期，重新解析；删除文件后缓存清理。
         std::thread::sleep(std::time::Duration::from_millis(20));
         write_docx(&first, "新的内容更长一些");
-        assert!(restarted.run(&root, &files, &cache_root, &report));
+        let files: Vec<FileRec> = files.iter().map(|rec| if rec.path == first { record(&first) } else { rec.clone() }).collect();
+        assert!(restarted.run(&root, &files, false, &cache_root, &report));
         assert_eq!(restarted.snapshot(&root).0[&key].text, "新的内容更长一些\n");
         fs::remove_file(workspace.join("坏.docx")).unwrap();
-        let remaining: Vec<PathBuf> = vec![first.clone()];
-        assert!(restarted.run(&root, &remaining, &cache_root, &report));
+        let remaining: Vec<FileRec> = vec![record(&first)];
+        assert!(restarted.run(&root, &remaining, false, &cache_root, &report));
         assert_eq!(restarted.snapshot(&root).0.len(), 1);
         let leftovers = fs::read_dir(fs::read_dir(&cache_root).unwrap().next().unwrap().unwrap().path()).unwrap().count();
         assert_eq!(leftovers, 1);
