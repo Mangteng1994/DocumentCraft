@@ -478,6 +478,28 @@ def assistant_organize(workspace: Path, question: str, payload: dict) -> dict:
     return {"status": "ok", **result}
 
 
+def figure_stage(source: Path, stage: str, payload: dict) -> dict:
+    """为编辑器执行科研配图的一个阶段，校验和回插在本机完成。"""
+    from .figure_workflow import commit_figures, plan_figures, refine_figure
+
+    settings = None
+    if stage in {"plan", "generate", "review"}:
+        settings = ai_settings()
+        connection = payload.get("connection")
+        if connection is not None:
+            if not isinstance(connection, dict) or connection.get("provider") != settings.provider:
+                raise ConversionError("AI 连接已变更，请重新分析并确认发送目标。")
+            if settings.provider == "api" and connection.get("endpoint") != settings.endpoint:
+                raise ConversionError("AI 接口地址已变更，请重新分析并确认发送目标。")
+    if stage == "commit":
+        result = commit_figures(source, payload)
+    elif stage == "plan":
+        result = plan_figures(source, settings, payload)
+    else:
+        result = refine_figure(source, settings, stage, payload)
+    return {"status": "ok", **result} if stage != "review" else result
+
+
 def illustrate_document(source: Path, *, colored: bool) -> dict:
     """对当前文档执行科研配图，生成配图版和审核清单。"""
     from .illustration import illustrate

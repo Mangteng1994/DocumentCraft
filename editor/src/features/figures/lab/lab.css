@@ -1,0 +1,29 @@
+/* 配图样张页（开发用，不进安装包）。只引用 tokens.css 的语义 token。 */
+.figure-lab {
+  padding: var(--dc-space-2xl);
+  background: var(--dc-color-surface);
+  color: var(--dc-color-ink);
+  font-size: var(--dc-font-size-ui);
+  display: flex;
+  flex-direction: column;
+  gap: var(--dc-space-3xl);
+}
+.figure-lab-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dc-space-sm);
+  align-items: flex-start;
+}
+.figure-lab-head {
+  font-weight: var(--dc-font-weight-heading);
+}
+.figure-lab-report {
+  font-size: var(--dc-font-size-sm);
+  color: var(--dc-color-ink-muted);
+}
+.figure-lab-report.is-warning {
+  color: var(--dc-color-warning);
+}
+.figure-lab-frame {
+  border: var(--dc-border);
+}

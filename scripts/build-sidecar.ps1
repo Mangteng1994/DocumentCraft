@@ -15,6 +15,8 @@ if ((Split-Path -Leaf $pandocExe) -ne 'pandoc.exe') {
 $pandocDir = Split-Path -Parent $pandocExe
 $copyright = Join-Path $pandocDir 'COPYRIGHT.txt'
 $copying = Join-Path $pandocDir 'COPYING.rtf'
+# PyInstaller resolves bundled resources relative to its generated spec directory.
+$figureSkill = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\core\src\documentcraft\figure_skill.md')).Path
 
 # Notes storage needs _sqlite3. Conda Pythons keep sqlite3.dll in Library\bin, which PyInstaller
 # does not collect, and the EXE then fails at startup with "DLL load failed". Bundle it explicitly.
@@ -36,6 +38,7 @@ try {
         '--name', 'DocumentCraft-cli', '--distpath', $Output,
         '--paths', 'core\src', '--specpath', 'out\pyinstaller', '--workpath', 'out\pyinstaller',
         '--collect-data', 'docx', '--collect-data', 'docxcompose', '--collect-data', 'babel',
+        '--add-data', "${figureSkill}:documentcraft",
         '--add-binary', "${pandocExe}:engine", '--add-data', "${copyright}:engine", '--add-data', "${copying}:engine",
         '--add-binary', "${sqliteDll}:.",
         'core\src\documentcraft\__main__.py'

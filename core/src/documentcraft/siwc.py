@@ -344,7 +344,9 @@ def account_models() -> list[ChatGPTModel]:
         raise ConversionError("无法读取 ChatGPT 模型列表。") from error
 
 
-def analyze_report(model: str, instructions: str, report: str, *, reasoning_effort: str = "") -> str:
+def analyze_report(
+    model: str, instructions: str, report: str | list[dict], *, reasoning_effort: str = "",
+) -> str:
     """使用 ChatGPT 套餐调用公开 Responses API，读取完整流。"""
     messages = [{"role": "user", "content": report}]
     deltas = stream_responses(model, instructions, messages, reasoning_effort=reasoning_effort)
