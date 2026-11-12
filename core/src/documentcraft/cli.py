@@ -51,6 +51,10 @@ def _build_parser() -> argparse.ArgumentParser:
     illustrate = commands.add_parser("illustrate", help="为科研报告生成配图")
     illustrate.add_argument("--source", required=True, type=Path)
     illustrate.add_argument("--style", choices=("mono", "colored"), default="mono")
+    illustrate.add_argument(
+        "--stage", choices=("plan", "generate", "review", "validate", "commit"),
+        help="编辑器的分阶段配图入口，参数从标准输入读取",
+    )
 
     assistant = commands.add_parser("assistant", help="Copilot：检索并整理工作区")
     assistant.add_argument("action", choices=("search", "organize"))
@@ -80,6 +84,8 @@ def _run_editor_command(args: argparse.Namespace) -> dict:
     if args.command == "share":
         return editor_api.share_package(args.source, args.output)
     if args.command == "illustrate":
+        if args.stage is not None:
+            return editor_api.figure_stage(args.source, args.stage, _read_payload())
         colored = args.style == "colored"
         return editor_api.illustrate_document(args.source, colored=colored)
     if args.command == "assistant":

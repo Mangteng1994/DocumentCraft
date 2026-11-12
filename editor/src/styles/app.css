@@ -1731,6 +1731,77 @@ textarea {
   white-space: pre-wrap;
 }
 
+.dc-figure-actions,
+.dc-figure-check {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--dc-space-sm);
+}
+
+.dc-figure-actions .dc-input {
+  width: auto;
+}
+
+.dc-figure-candidate,
+.dc-figure-details[open] {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dc-space-md);
+}
+
+.dc-figure-details {
+  padding: var(--dc-space-md) 0;
+  border-top: var(--dc-border);
+}
+
+.dc-figure-details summary {
+  color: var(--dc-color-ink);
+  font-size: var(--dc-font-size-ui);
+  cursor: pointer;
+}
+
+.dc-figure-field {
+  display: grid;
+  grid-template-columns: minmax(0, var(--dc-size-figure-field)) minmax(0, 1fr);
+  align-items: center;
+  gap: var(--dc-space-md);
+  font-size: var(--dc-font-size-sm);
+}
+
+.dc-figure-preview {
+  margin: 0;
+  padding: var(--dc-space-sm);
+  max-height: var(--dc-size-figure-preview);
+  overflow: auto;
+  border: var(--dc-border);
+  border-radius: var(--dc-radius-md);
+  background: var(--dc-color-surface);
+}
+
+.dc-figure-preview img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin-inline: auto;
+}
+
+.dc-figure-preview img.is-actual-size {
+  max-width: none;
+}
+
+.dc-figure-preview figcaption {
+  padding: var(--dc-space-xs) var(--dc-space-sm);
+}
+
+/* 保留真实布局尺寸，图的根节点单独序列化进 PNG。 */
+.dc-figure-render-host {
+  position: fixed;
+  inset: 0 auto auto 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
 .dc-hotkey {
   display: flex;
   flex-wrap: wrap;

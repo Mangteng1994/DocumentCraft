@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 import json
 import os
 from pathlib import Path
+import re
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
@@ -120,7 +121,7 @@ def _api_target(settings: AISettings) -> tuple[str, str]:
     return endpoint, key
 
 
-def _api_analysis(settings: AISettings, instructions: str, report: str) -> str:
+def _api_analysis(settings: AISettings, instructions: str, report: str | list[dict]) -> str:
     endpoint, key = _api_target(settings)
     request_data = {
         "model": settings.model,
@@ -196,18 +197,30 @@ def stream_chat(settings: AISettings, system: str, messages: list[dict]) -> Iter
     raise ConversionError("请先选择 AI 连接方式。")
 
 
-def request_json(settings: AISettings, instructions: str, payload: object) -> dict:
+def request_json(settings: AISettings, instructions: str, payload: object, *, image: str | None = None) -> dict:
     """通过选定连接提交数据并解析模型返回的 JSON 对象。"""
     report = json.dumps(payload, ensure_ascii=False)
     try:
         if settings.provider == "chatgpt":
+            content = report if image is None else [
+                {"type": "input_text", "text": report},
+                {"type": "input_image", "image_url": image, "detail": "high"},
+            ]
             response = analyze_report(
-                settings.model, instructions, report, reasoning_effort=settings.reasoning_effort,
+                settings.model, instructions, content, reasoning_effort=settings.reasoning_effort,
             )
         elif settings.provider == "api":
-            response = _api_analysis(settings, instructions, report)
+            content = report if image is None else [
+                {"type": "text", "text": report},
+                {"type": "image_url", "image_url": {"url": image}},
+            ]
+            response = _api_analysis(settings, instructions, content)
         else:
             raise ConversionError("请先选择 AI 连接方式。")
+        if isinstance(response, str):
+            fenced = re.fullmatch(r"\s*```(?:json)?\s*([\s\S]+?)\s*```\s*", response, re.I)
+            if fenced:
+                response = fenced.group(1)
         result = json.loads(response)
     except (json.JSONDecodeError, TypeError) as error:
         raise ConversionError("分析服务没有返回有效的 JSON。") from error

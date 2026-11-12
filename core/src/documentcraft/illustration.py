@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 from contextlib import suppress
+from hashlib import sha256
 import json
 import os
 from pathlib import Path
@@ -10,8 +11,10 @@ from tempfile import TemporaryDirectory
 from uuid import uuid4
 
 from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.document import Document
 from docx.oxml.ns import qn
-from docx.shared import Cm
+from docx.section import Section
+from docx.shared import Cm, Pt
 from docx.text.paragraph import Paragraph
 
 from .ai import AISettings, analyze
@@ -250,8 +253,8 @@ def _plan_payload(blocks: list[ReportBlock], cues: dict[int, str], outline: list
     }
 
 
-def _validate(diagram: dict, blocks: list[ReportBlock], cues: dict[int, str]) -> str:
-    """核对插入锚点、原文证据和技术图约束。"""
+def _validate_placement(diagram: dict, blocks: list[ReportBlock], cues: dict[int, str]) -> str:
+    """核对插入锚点、图位引用和取证范围。"""
     anchor = diagram["anchor"]
     if not _block_id(anchor, blocks) or not _is_insertable(blocks[anchor - 1], cues.get(anchor)):
         return "插入位置不是可用的正文段落"
@@ -267,17 +270,29 @@ def _validate(diagram: dict, blocks: list[ReportBlock], cues: dict[int, str]) ->
     evidence_ranges = diagram["evidence_ranges"]
     if not isinstance(evidence_ranges, list) or not evidence_ranges:
         return "缺少取证范围"
-    evidence_sections = []
     for region in evidence_ranges:
         start, end = region["start"], region["end"]
         if not _block_id(start, blocks) or not _block_id(end, blocks) or start > end:
             return "取证范围无效"
-        evidence_sections.append("\n".join(block.text for block in blocks[start - 1:end]))
     if type(diagram["overview"]) is not bool or diagram["type"] not in {"route", "flow", "structure"}:
         return "图示类型无效"
     title = diagram["title"]
     if not title.strip() or re.search(r"[\r\n]", title) or re.match(r"^图\s*[0-9０-９]", title.strip()):
         return "图名为空、包含换行或带图号"
+    return ""
+
+
+def _validate(diagram: dict, blocks: list[ReportBlock], cues: dict[int, str]) -> str:
+    """核对旧版 CLI 的节点与连线。"""
+    problem = _validate_placement(diagram, blocks, cues)
+    if problem:
+        return problem
+    anchor = diagram["anchor"]
+    evidence_ranges = diagram["evidence_ranges"]
+    evidence_sections = [
+        "\n".join(block.text for block in blocks[region["start"] - 1:region["end"]])
+        for region in evidence_ranges
+    ]
     nodes, edges = diagram["nodes"], diagram["edges"]
     if len(nodes) < 2 or not edges:
         return "技术关系不足"
@@ -318,11 +333,13 @@ def _markdown_text(value: str) -> str:
     return re.sub(r"([\\`*_{}\[\]()#+.!|<>~-])", r"\\\1", value)
 
 
-def _insert_word(document, anchor: Paragraph, image: Path, title: str | None) -> None:
+def _insert_word(
+    document: Document, anchor: Paragraph, image: Path, title: str | None, width: float | None = None,
+) -> None:
     figure = document.add_paragraph()
     figure.alignment = WD_ALIGN_PARAGRAPH.CENTER
     figure.paragraph_format.keep_with_next = True
-    figure.add_run().add_picture(str(image), width=Cm(14))
+    figure.add_run().add_picture(str(image), width=Pt(width) if width is not None else Cm(14))
     anchor._p.addnext(figure._p)
     if title is None:
         return
@@ -400,7 +417,66 @@ def _append_review_rows(rows: list[str], entries: list[tuple]) -> None:
         rows.append("| " + " | ".join(fields) + " |")
 
 
-def illustrate(source: Path, settings: AISettings, *, colored: bool) -> dict:
+def _read_report(source: Path, work: Path) -> tuple[bytes, str, Document | None, list[ReportBlock]]:
+    """读取原始报告以及仅在本地使用的插入锚点。"""
+    extension = source.suffix.lower()
+    if extension in {".md", ".markdown"}:
+        raw = source.read_bytes()
+        original = raw.decode("utf-8-sig")
+        return raw, original, None, _markdown_blocks(source, original)
+    if extension not in {".doc", ".docx"}:
+        raise ConversionError("请选择 Markdown、DOCX 或 DOC 文件。")
+    docx = source
+    if extension == ".doc":
+        docx = work / "source.docx"
+        _legacy_docx(source, docx)
+    document = open_docx(docx)
+    return b"", "", document, _word_blocks(document)
+
+
+def source_digest(source: Path) -> str:
+    """对源报告取指纹，以便回插时检测文件变动。"""
+    digest = sha256()
+    with source.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def figure_page(document: Document | None, anchor: Paragraph | int | None) -> tuple[float, float]:
+    """返回图位所在节的可用宽高（pt），高度预留图题空间。"""
+    if document is None or not isinstance(anchor, Paragraph):
+        return 450.0, 650.0
+    section = document.sections[-1]
+    # Word 的分节属性写在该节的最后一段或正文末尾。
+    for paragraph in (anchor._p, *anchor._p.itersiblings(tag=qn("w:p"))):
+        properties = paragraph.find(qn("w:pPr"))
+        if properties is None:
+            continue
+        section_properties = properties.find(qn("w:sectPr"))
+        if section_properties is not None:
+            section = Section(section_properties, document.part)
+            break
+    width = (section.page_width or Cm(21)) - (section.left_margin or 0) - (section.right_margin or 0)
+    width -= section.gutter or 0
+    columns = section._sectPr.find(qn("w:cols"))
+    if columns is not None:
+        explicit_widths = [int(item.get(qn("w:w"))) for item in columns if item.get(qn("w:w"))]
+        count = int(columns.get(qn("w:num"), "1"))
+        if explicit_widths:
+            width = min(width, min(explicit_widths) * 635)
+        elif count > 1:
+            gap = int(columns.get(qn("w:space"), "720")) * 635
+            width = (width - gap * (count - 1)) / count
+    height = (section.page_height or Cm(29.7)) - (section.top_margin or 0) - (section.bottom_margin or 0)
+    if width < Pt(90) or height < Pt(100):
+        raise ConversionError("该节可用版心过小。")
+    return round(width / 12700, 2), round(height / 12700 - 28, 2)
+
+
+def illustrate(
+    source: Path, settings: AISettings | None, *, colored: bool, prepared: dict | None = None,
+) -> dict:
     """生成图片、配图版报告和人工复核清单，保留输入文件。"""
     source = source.resolve(strict=True)
     extension = source.suffix.lower()
@@ -413,22 +489,25 @@ def illustrate(source: Path, settings: AISettings, *, colored: bool) -> dict:
     assets = source.parent / job
     with TemporaryDirectory(prefix=".documentcraft-", dir=source.parent) as folder:
         work = Path(folder)
-        if markdown:
-            raw = source.read_bytes()
-            original = raw.decode("utf-8-sig")
-            blocks = _markdown_blocks(source, original)
-        else:
-            docx = source
-            if extension == ".doc":
-                docx = work / "source.docx"
-                _legacy_docx(source, docx)
-            document = open_docx(docx)
-            blocks = _word_blocks(document)
+        if prepared is not None and prepared.get("digest") != source_digest(source):
+            raise ConversionError("源报告已变动，请重新分析后再回插。")
+        raw, original, document, blocks = _read_report(source, work)
         if not blocks:
             raise ConversionError("报告没有可分析的正文。")
         cues = _figure_cues(blocks)
         outline = _report_outline(blocks)
-        plan = analyze(settings, _plan_payload(blocks, cues, outline))
+        if prepared is None:
+            if settings is None:
+                raise ConversionError("缺少 AI 连接设置。")
+            plan = analyze(settings, _plan_payload(blocks, cues, outline))
+        else:
+            from .figure_workflow import validate_plan, write_approved_png
+
+            plan = validate_plan(prepared.get("plan"))
+            if not isinstance(prepared.get("images"), dict):
+                raise ConversionError("缺少已确认的配图清单。")
+            if any(not isinstance(prepared.get(key, {}), dict) for key in ("skipped", "notes")):
+                raise ConversionError("跳过或复核清单格式错误。")
         staged_assets = work / job
         staged_assets.mkdir()
         issues = []
@@ -467,9 +546,15 @@ def illustrate(source: Path, settings: AISettings, *, colored: bool) -> dict:
             stage = "候选校验未通过"
             image = staged_assets / f"figure-{index}.png"
             try:
-                problem = _validate(diagram, blocks, cues)
+                validator = _validate if prepared is None else _validate_placement
+                problem = validator(diagram, blocks, cues)
                 if problem:
                     raise ConversionError(problem)
+                if prepared is not None and str(index) not in prepared["images"]:
+                    stage = "未回插"
+                    reason = prepared.get("skipped", {}).get(str(index))
+                    detail = reason[:500] if isinstance(reason, str) and reason.strip() else "未选择这张图"
+                    raise ConversionError(detail)
                 duplicates = sorted({
                     ref for ref in diagram["references"] if ref in resolved
                     and not _allows_multiple_targets(blocks[ref - 1], cues[ref])
@@ -482,14 +567,25 @@ def illustrate(source: Path, settings: AISettings, *, colored: bool) -> dict:
                     raise ConversionError("同一正文位置已插图")
                 if overview and diagram["overview"]:
                     raise ConversionError("全文已生成一张总览图")
-                fingerprint = frozenset(
-                    (diagram["nodes"][edge["from"]]["label"], diagram["nodes"][edge["to"]]["label"])
-                    for edge in diagram["edges"]
-                )
+                width = None
+                if prepared is None:
+                    fingerprint = frozenset(
+                        (diagram["nodes"][edge["from"]]["label"], diagram["nodes"][edge["to"]]["label"])
+                        for edge in diagram["edges"]
+                    )
+                else:
+                    fingerprint = frozenset((region["start"], region["end"]) for region in diagram["evidence_ranges"])
+                    fingerprint = (diagram["title"], fingerprint)
                 if fingerprint in fingerprints:
                     raise ConversionError("节点关系与已有新图重复")
                 stage = "候选绘制失败"
-                render_diagram(diagram, image, colored)
+                if prepared is None:
+                    render_diagram(diagram, image, colored)
+                else:
+                    width, height = figure_page(document, blocks[anchor - 1].anchor)
+                    write_approved_png(
+                        prepared["images"].get(str(index)), image, diagram, blocks, width, height,
+                    )
             except (ConversionError, OSError, TypeError, ValueError, KeyError, AttributeError) as error:
                 image.unlink(missing_ok=True)
                 reason = f"{stage}：{error}"
@@ -506,7 +602,7 @@ def illustrate(source: Path, settings: AISettings, *, colored: bool) -> dict:
                 continue
             title = diagram["title"].strip()
             reuse_caption = cues.get(anchor + 1) == "caption" and anchor + 1 in diagram["references"]
-            edits.append((blocks[anchor - 1].anchor, image, None if reuse_caption else title))
+            edits.append((blocks[anchor - 1].anchor, image, None if reuse_caption else title, width))
             generated[anchor] = title
             resolved.update(diagram["references"])
             spans = ", ".join(f"{region['start']}–{region['end']}" for region in diagram["evidence_ranges"])
@@ -515,6 +611,10 @@ def illustrate(source: Path, settings: AISettings, *, colored: bool) -> dict:
             result = f"已生成 {image.name}"
             if reference_ids:
                 result += f"。对应引用 {reference_ids}"
+            if prepared is not None:
+                note = prepared.get("notes", {}).get(str(index))
+                if isinstance(note, str) and note.strip():
+                    result += f"。{note[:500]}"
             review_rows.append((category, anchor, title, spans, result))
             fingerprints.add(fingerprint)
             overview = overview or diagram["overview"]
@@ -538,7 +638,7 @@ def illustrate(source: Path, settings: AISettings, *, colored: bool) -> dict:
         if markdown:
             lines = original.splitlines(keepends=True)
             newline = "\r\n" if "\r\n" in original else "\n"
-            for anchor, image, title in sorted(edits, reverse=True):
+            for anchor, image, title, _width in sorted(edits, reverse=True, key=lambda edit: edit[0]):
                 prefix = newline if not lines[anchor - 1].endswith(("\n", "\r")) else ""
                 snippet = f"{prefix}{newline}![]({job}/{image.name}){newline}{newline}"
                 if title is not None:
@@ -547,8 +647,8 @@ def illustrate(source: Path, settings: AISettings, *, colored: bool) -> dict:
             encoding = "utf-8-sig" if raw.startswith(b"\xef\xbb\xbf") else "utf-8"
             staged_output.write_bytes("".join(lines).encode(encoding))
         else:
-            for anchor, image, title in edits:
-                _insert_word(document, anchor, image, title)
+            for anchor, image, title, width in edits:
+                _insert_word(document, anchor, image, title, width)
             document.save(staged_output)
             open_docx(staged_output)
         review = staged_assets / "审核清单.md"
@@ -566,6 +666,8 @@ def illustrate(source: Path, settings: AISettings, *, colored: bool) -> dict:
         _append_review_rows(rows, issues or [("—", "无待确认问题")])
         review.write_text("\n".join(rows) + "\n", encoding="utf-8")
         # 输出先在同一磁盘完成写入，再发布；发生冲突时回收本次新资源目录。
+        if prepared is not None and prepared["digest"] != source_digest(source):
+            raise ConversionError("源报告已变动，请重新分析后再回插。")
         if output.exists() or assets.exists():
             raise ConversionError("输出路径已存在，请重新运行。")
         staged_assets.rename(assets)

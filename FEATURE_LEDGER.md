@@ -35,7 +35,7 @@
 | DC-032 | 编辑器内导出 Word | 从「设置 → MD 转 Word」把当前文档按样式或完整模板导出 DOCX，默认模板与模式可保存，可选包含批注；已有输出受保护 | 已实现 · 入口移至设置 · `editor/src/features/settings/WordExportSettings.tsx` → `docflow md-to-word --with-notes`；设置页经模拟 IPC 验收，导出逻辑沿用此前实跑结果 |
 | DC-033 | 编辑器批注 | 选中正文添加批注，侧栏列出并定位；批注按原文与前后文锚定，编辑后重新定位，无法定位的标记为待定位；数据沿用 `.documentcraft/reader-spike.sqlite3` | 已验收（CLI 实跑 + 模拟 IPC） · `annotations.ts`、`CommentsPanel.tsx`、`docflow notes` |
 | DC-034 | Copilot 工作区整理 | 交互对应 Obsidian Copilot 的 Quick Chat：流式回答与停止；当前笔记、选区、[[笔记]] 与 + / @ 添加的上下文；/ 命令；对话与工作区检索两种模式；消息复制、编辑、插入或替换、重新生成、删除；对话自动保存与历史；AI 连接沿用已有配置 | 已验收（模拟 IPC） · `editor/src/features/copilot/`、`docflow chat`；流式对话经本地假 API 实跑，真实 AI 服务未请求 |
-| DC-035 | 编辑器内科研配图 | 从「设置 → 科研流程图」对当前文档发起配图分析，默认风格可保存，确认外发后生成配图版和审核清单 | 已实现 · 入口移至设置 · `editor/src/features/settings/FigureSettings.tsx` → `docflow illustrate`；真实 AI 配图未执行 |
+| DC-035 | 编辑器内科研配图 | 从「设置 → 科研流程图」对当前文档或选定报告发起配图分析，可保存绘图风格，确认外发后预览并选择回插 | 已实现 · `editor/src/features/settings/FigureSettings.tsx` → `docflow illustrate --stage`；已核对原生设置、选报告和发送确认窗口，见 DC-061 |
 | DC-036 | 编辑器 AI 设置 | 兼容 API 与 ChatGPT 套餐两种连接；登录、取消、退出、模型和推理强度选择并保存；API Key 仅保留在当前会话 | 部分验收 · 移入「设置 → AI 连接」`editor/src/features/settings/AIConnectionSettings.tsx`；登录、取消与模型读取未执行 |
 | DC-037 | Python sidecar JSON 接口 | `docflow` 为编辑器提供 notes、share、illustrate、assistant、ai 子命令，统一 JSON 输出与非零失败码 | 已验收 · `editor_api.py`、`cli.py`；notes、share、md-to-word、assistant search、ai status 实跑 |
 | DC-040 | 目录约定 | 按 AGENTS.md「目录约定」划分 editor/、core/、scripts/、out/、local/；构建产物只写入 out/，私有资料在 local/ | 已实现 · AGENTS.md；Python 与 Rust 测试在新路径下通过 |
@@ -58,8 +58,13 @@
 | DC-058 | 搜索范围模式 | 搜索框左侧的范围按钮提供三种模式：「所有」（所有文件的文件名 + 正文，正文含纯文本和 DC-059 的 Word、Excel、PowerPoint、PDF）、「所有文件名」（只匹配文件名，含非 Markdown 文件）、「所有正文」（只匹配正文，含纯文本与 DC-059 的文档）；模式保存在设置中；点击 Markdown 结果在编辑器打开，其他文件用系统默认应用打开（程序和脚本拒绝运行）；隐藏文件夹不搜，非 UTF-8 文本只按文件名匹配 | 已验收（模拟 IPC + Rust 测试）· `editor/src/sidebar/SearchView.tsx`、`settings/schema.ts` 的 `files.searchMode`、`src-tauri/src/workspace.rs` 的 `SearchMode` |
 | DC-059 | Word、Excel、PowerPoint、PDF 正文搜索 | 侧栏搜索的「所有」「所有纯文本正文」两种模式同时检索 docx、xlsx、pptx、pdf 的正文：首次搜索后台解析并建立文本缓存（保存在应用数据目录，按文件修改时间与大小判断是否过期，增量更新，不写入工作区），索引期间显示进度、完成后自动刷新结果；结果显示所在页、段或行，点击用系统默认应用打开；加密、损坏和扫描件（无文字层）跳过并计数提示；旧版 doc、xls、ppt 暂不解析 | 已验收（Rust 测试 + 真实工作区 + 模拟 IPC）· `src-tauri/src/extract.rs`、`textindex.rs`、`workspace.rs` 的 `index_workspace`/`search_workspace`，`editor/src/sidebar/searchIndex.ts`、`SearchView.tsx` |
 | DC-060 | 大工作区（网络共享、数万文件）可打开与搜索 | 打开文件夹时目录树有读取预算（条目数与时间），预算内读完保持原有行为（只显示含 Markdown 的文件夹）；超出预算自动改为按需加载：只读顶层，展开哪个文件夹才读哪个，并说明；逐项读取不再为每个文件额外访问网络；搜索遇到大工作区时在后台扫描文件列表并显示进度，之后搜索使用缓存列表而不是每次重新遍历；大工作区不自动对 Word、Excel、PowerPoint、PDF 和 Markdown 建立正文索引，提供手动建立的按钮；大工作区里 txt、csv、代码等其他纯文本只能按文件名搜索 | 已验收（Rust 测试 + 真实网络共享 + 模拟 IPC）· `src-tauri/src/workspace.rs` 的 `list_tree`/`list_dir`/`walk_files`/`ensure_scan`、`textindex.rs` 的 `FileRec`/`ScanResult`，`editor/src/sidebar/FileTree.tsx`、`SearchView.tsx`、`searchIndex.ts` |
+| DC-061 | 科研配图重做 | 设置入口读取报告并生成带锚点和取证范围的图位计划，按图并行生成和校验组件树；内置配图规范维护提示词和版式示例；浏览器按版心和印刷字号排版、检查版面并输出高分辨率 PNG；用户逐张预览、改字、调整版式、重生成和选择回插，审核清单记录失败或跳过项 | 已实现 · `core/src/documentcraft/figure_workflow.py`、`figure_skill.md`、`illustration.py`、`editor/src/features/figures/`、`FigureSettings.tsx`；真实报告复验回插 23 张，WPS 图题同页，见 2026-11-12 试跑 |
 
 ## Should
+
+| ID | 功能 | 验收条件 | 状态 |
+| --- | --- | --- | --- |
+| DC-062 | 科研配图分阶段模型与视觉复核 | 规划、单图和视觉复核可使用同一连接下的不同模型；视觉复核默认关闭，开启后最多两轮，修订失败可保留原预览 | 已实现 · `figure_workflow.py`、`ai.py`、`siwc.py`、`editor/src/features/figures/workflow.tsx`、`FigureSettings.tsx`；模拟接口核对了视觉复核的图片和取证载荷，真实模型未测试 |
 
 | ID | 功能 | 验收条件 | 状态与实现 |
 | --- | --- | --- | --- |
@@ -79,7 +84,7 @@
 
 | ID | 功能 | 验收条件 | 状态与实现 |
 | --- | --- | --- | --- |
-| DC-038 | 编辑器安装包 | Tauri 打包含 `docflow` sidecar 的 Windows 安装包 | 已实现 · 部分验收。`scripts/build-sidecar.ps1` → `out/sidecar/`，`npm run bundle`（`scripts/bundle-editor.ps1`，MSVC 工具链）生成 `DocumentCraft_0.2.7_x64-setup.exe`；release 版可启动，sidecar 在隔离 PATH 下对话与导出通过；安装包未实际安装 |
+| DC-038 | 编辑器安装包 | Tauri 打包含 `docflow` sidecar 的 Windows 安装包 | 已实现 · 部分验收。`scripts/build-sidecar.ps1` → `out/sidecar/`，`npm run bundle`（`scripts/bundle-editor.ps1`，MSVC 工具链）生成 `DocumentCraft_0.2.8_x64-setup.exe`；见 2026-11-12 打包验收记录 |
 | DC-008 | 旧版 DOC 与 WPS COM | 可通过 WPS 对 DOC 模板和输出进行兼容转换 | 后续文档引擎切片 |
 | DC-009 | 本地工作台与模板管理 | Vue 3 / Tauri 2 经 FastAPI 调用核心，SQLite 保存任务和模板元数据 | 后续产品切片 |
 | DC-019 | HTML 转 PPT | 可在导航中独立接入 HTML 转 PPT 工作流 | 后续切片 |
@@ -150,6 +155,20 @@ foreach ($step in 'save','reopen','style','full','skip','plain') {
 
 - 前一版试跑用同一去图稿生成 13 张图，32 处图题和引用均有对应结果。与旧稿 19 张对照：11 张主题对应，1 张部分覆盖，7 张未单独出图。初始只生成 7 张的审核记录显示，多个有明确引用的图位在规划阶段被误判为疑似已有图。
 - 本轮按真实标题树盘点，要求对无显式引用的关键关系同样逐节检查。审核清单保留插入锚点、取证范围、引用去向及未单独出图的理由；并入其他图的结论只在目标图成功生成后成立。新规则已实现，未再次对原稿执行自动配图。
+
+## 2026-11-12 科研配图离线试跑
+
+- 用历史去图版 DOCX 的副本，串联 Python sidecar、本机模拟兼容 API、Chrome 排版和 DOCX 回插。读取 735 个文档块，识别 32 处图题或引用。模拟规划给出 3 个图位，分图请求只包含相应取证段落。
+- 验证一张图在取证校验失败后重试成功，另一张图因过于扁长自动重排成功。3 张候选均完成栅格化和模拟视觉复核请求。对其中一张替换原文短语并重新出图，选 2 张回插。核对 DOCX 新增 2 个内嵌图片、PNG 均约 384 dpi、审核清单记录另 1 张未回插，源文件哈希一致。
+- Python 8 项通过，Rust 25 项通过、4 项按原设置跳过，前端生产构建通过。修复 PyInstaller 从 spec 目录解析相对路径导致配图规范漏打的问题。重新打包后，用只含 System32 的 PATH 运行打包版 sidecar，重复通过离线试跑。
+- NSIS 安装包解包后可以启动原生编辑器，打开科研流程图设置、选择 DOCX 并查看发送前确认。WPS 以只读方式打开离线配图稿，确认两张图分别在第 10 页和第 22 页且与图题同页。
+- 七个样张通过浏览器版面检查并输出 PNG。三个样张经标题分行、泳道折行、缩短标签或增加箭头标签留白后重新验收。七张原始参考图逐一对照、NSIS 安装与卸载流程未执行。
+
+## 2026-11-12 科研配图真实模型验收
+
+- 用配置中的 ChatGPT 文本模型分析 54 页去图稿，视觉复核关闭。首次规划 23 个候选并覆盖 32 处引用和图题。首轮约 16 分钟，回插 21 张，另两张分别因引文未逐字匹配和箭头标签遮挡被拦下。
+- 顺序链标签改为在布局中占位，窄列内可换行。对取证失败图单独重生成，沿用原图位计划重新排版和回插。最终 23 张均通过版面检查，覆盖 32 处引用和图题，审核清单保留 5 项待确认。PNG 均约 384 dpi，逐一核对了插入锚点，源稿与测试副本哈希一致。
+- WPS 只读重排后共 74 页，23 张图全部与图题同页。修正后七个样张再次导出成功，重新构建的 Windows x64 NSIS 安装包通过完整性检查。真实视觉复核与微软 Word 未验证。
 
 ## 界面开发约束
 

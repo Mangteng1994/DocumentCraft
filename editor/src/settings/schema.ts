@@ -62,6 +62,10 @@ export interface Settings {
   };
   figure: {
     style: FigureStyle;
+    plannerModel: string;
+    figureModel: string;
+    reviewModel: string;
+    visualReview: boolean;
   };
   layout: {
     /** 左侧栏与右侧栏宽度（像素），0 表示使用设计令牌中的默认宽度。 */
@@ -98,7 +102,7 @@ export const DEFAULT_SETTINGS: Settings = {
     mode: "chat",
   },
   wordExport: { template: "", mode: "auto", includeNotes: true },
-  figure: { style: "mono" },
+  figure: { style: "colored", plannerModel: "", figureModel: "", reviewModel: "", visualReview: false },
   layout: { sidebarWidth: 0, panelWidth: 0 },
   history: { recentWorkspaces: [] },
 };

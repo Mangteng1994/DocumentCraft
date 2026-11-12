@@ -111,7 +111,13 @@ sidecar 输出到 `out/sidecar/`。`npm run bundle` 调用 `scripts/bundle-edito
 
 选择「ChatGPT 套餐」，点击「Continue with ChatGPT」，在系统浏览器登录并授权 DocumentCraft 使用套餐额度。应用用 Windows DPAPI 加密保存会话。登录后分别选择模型和推理强度。可选强度随模型变化，选择「模型默认」时由服务端决定。点击「保存设置」可在下次启动时恢复选择。此连接通过公开 Responses API 分析正文，由本地程序绘制 PNG。[官方桌面登录流程](https://developers.openai.com/siwc/token-sharing-open-source/sign-in)
 
-打开报告后进入「设置 → 科研流程图」，选择黑白或分区配色风格，然后开始配图。程序在确认后向所选服务提交报告文本、标题层级、实图位置和引用线索。结果包括配图版报告、PNG 资源和 `审核清单.md`。命令行的 `docflow illustrate` 也接受 DOCX，旧版 DOC 需要本机 WPS，配图版输出 DOCX。
+在「设置 → 科研流程图」使用当前 Markdown，或选择 Markdown、DOCX、DOC 报告。确认发送后，规划模型读取正文、标题层级、实图位置和引用线索。单图生成并行执行，每张图只发送自己的取证段落。
+
+先预览候选图，再选择要回插的图。可以逐张编辑图内文字、调整版式或重新生成。程序逐字核对图内文字和连线依据，按 Word 节版心排版并导出 300 dpi 以上的 PNG。Markdown 使用 A4 常用版心。回插后在源报告旁生成配图版、PNG 资源和 `审核清单.md`。旧版 DOC 需要本机 WPS 转换，配图版输出 DOCX。
+
+「分阶段模型与视觉复核」可分别填图位规划、单图生成和视觉复核的模型 ID。留空使用当前连接的默认模型。视觉复核默认关闭，开启后会将候选图和该图的取证段落发给支持图片输入的模型，最多两轮。
+
+开发时可在 Vite 的 `/figure-lab.html` 查看七个组件树样张。随 sidecar 内置的 `core/src/documentcraft/figure_skill.md` 包含三阶段提示词和版式示例，图的外观令牌定义在 `editor/src/styles/tokens.ts`。不带 `--stage` 的 `docflow illustrate` 继续提供独立的命令行配图入口。
 
 审核清单区分「有引用但缺图」「原文适合新增」「已有实图」「待确认」，并分开记录插入位置和取证范围。图名和「如下图所示」是引用线索，只有原稿中的实图位置才能用于覆盖判断。节选按实际标题层级盘点全文总览、场景路线和细节机制，可以在章节概述后插图，同时从后续段落或表格取证。
 
