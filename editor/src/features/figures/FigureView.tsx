@@ -97,11 +97,12 @@ function trimEnd(points: Point[], amount: number): Point[] {
   return result;
 }
 
-function SimpleArrow({ direction, length }: { direction: Direction; length: number }) {
-  const head = px(figureTokens.arrowHead.width);
-  const stroke = px(figureTokens.stroke.link);
+function SimpleArrow({ direction, length, open = false }: { direction: Direction; length: number; open?: boolean }) {
+  const head = px(open ? figureTokens.arrowHead.openWidth : figureTokens.arrowHead.width);
+  const stroke = px(open ? figureTokens.stroke.primary : figureTokens.stroke.link);
   const tip: Point = [length, head / 2];
-  const shaft = orient(trimEnd([[0, head / 2], tip], px(figureTokens.arrowHead.length) * 0.8), direction, length);
+  const tail: Point = [0, head / 2];
+  const shaft = orient(open ? [tail, tip] : trimEnd([tail, tip], px(figureTokens.arrowHead.length) * 0.8), direction, length);
   const triangle = orient(arrowHead(tip, [0, head / 2]), direction, length);
   const vertical = direction === "up" || direction === "down";
   const width = vertical ? head : length;
@@ -109,7 +110,10 @@ function SimpleArrow({ direction, length }: { direction: Direction; length: numb
   return (
     <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`}>
       <polyline points={pointList(shaft)} fill="none" stroke="currentColor" strokeWidth={stroke} />
-      <polygon points={pointList(triangle)} fill="currentColor" />
+      {open ? (
+        <polyline points={pointList(orient([[length - head / 2, 0], tip, [length - head / 2, head]], direction, length))}
+          fill="none" stroke="currentColor" strokeWidth={stroke} strokeLinejoin="round" />
+      ) : <polygon points={pointList(triangle)} fill="currentColor" />}
     </svg>
   );
 }
@@ -138,12 +142,12 @@ function HollowArrow({ direction }: { direction: Direction }) {
 }
 
 function ArrowView({ block }: { block: ArrowBlock }) {
-  const hollow = block.style === "hollow";
+  const variant = block.style ?? "solid";
   const vertical = block.direction === "up" || block.direction === "down";
-  const length = px(hollow ? figureTokens.layoutArrow.hollow : figureTokens.layoutArrow.solid);
-  const shape = hollow
+  const length = px(figureTokens.layoutArrow[variant]);
+  const shape = variant === "hollow"
     ? <HollowArrow direction={block.direction} />
-    : <SimpleArrow direction={block.direction} length={length} />;
+    : <SimpleArrow direction={block.direction} length={length} open={variant === "open"} />;
   const style: CSSProperties = vertical ? { flexDirection: "row" } : {};
   return (
     <div className="dcf-arrow" data-fid={block.id} style={style}>
@@ -200,9 +204,22 @@ function BlockView({ block, flex }: { block: Block; flex?: string }) {
   switch (block.kind) {
     case "row": {
       let weightIndex = 0;
-      const className = block.stretch === false ? "dcf-row is-center" : "dcf-row";
+      const classes = ["dcf-row", gapClass(block.gap, "normal")];
+      const style: CSSProperties = { ...flexStyle(flex) };
+      if (block.stretch === false) {
+        classes.push("is-center");
+      }
+      const stageBands = block.stretch !== false && block.children.length >= 5
+        && block.children.every((child) => child.kind === "panel" && (child.header ?? "band") === "band");
+      if (stageBands) {
+        // 阶段共用标题行，最长标题换行时仍能对齐各栏的内容起点。
+        classes.push("has-stage-bands");
+        style.gridTemplateColumns = block.children.map((_, index) =>
+          `minmax(0, ${block.weights?.[index] ?? 1}fr)`,
+        ).join(" ");
+      }
       return (
-        <div className={`${className} ${gapClass(block.gap, "normal")}`} data-fid={block.id} style={flexStyle(flex)}>
+        <div className={classes.join(" ")} data-fid={block.id} style={style}>
           {block.children.map((child, index) => {
             if (child.kind === "arrow") {
               return <BlockView key={index} block={child} />;
@@ -287,6 +304,9 @@ function BlockView({ block, flex }: { block: Block; flex?: string }) {
       if (Icon) {
         classes.push("has-icon");
       }
+      if (block.tags?.length) {
+        classes.push("has-tags");
+      }
       const style = { ...toneVariables(block.tone), ...flexStyle(flex) };
       const text = (
         <>
@@ -297,7 +317,7 @@ function BlockView({ block, flex }: { block: Block; flex?: string }) {
       return (
         <div className={classes.join(" ")} data-fid={block.id} style={style}>
           {Icon ? <Icon className="dcf-card-icon" strokeWidth={figureTokens.stroke.icon} /> : null}
-          {Icon ? <div className="dcf-card-text">{text}</div> : text}
+          <div className="dcf-card-text">{text}</div>
           {block.tags?.length ? (
             <div className="dcf-tags">
               {block.tags.map((tag, index) => <span key={index} className="dcf-tag">{tag}</span>)}
@@ -312,7 +332,7 @@ function BlockView({ block, flex }: { block: Block; flex?: string }) {
       return (
         <div className="dcf-decision" data-fid={block.id} style={style}>
           <svg viewBox="0 0 100 100" preserveAspectRatio="none">
-            <polygon points="50,0 100,50 50,100 0,50" style={{ fill: "var(--t-card)", stroke: "var(--t-border)" }}
+            <polygon points="50,0 100,50 50,100 0,50" style={{ fill: "var(--t-surface)", stroke: "var(--f-border)" }}
               strokeWidth={stroke} vectorEffect="non-scaling-stroke" />
           </svg>
           <span>{block.text}</span>
@@ -510,19 +530,23 @@ function LinkLayer({ routes, width, height, labelPt }: { routes: RoutedLink[]; w
     <svg className="dcf-links" width={width} height={height} viewBox={`0 0 ${width} ${height}`}>
       {routes.map(({ link, points }, index) => {
         const primary = link.style === "primary";
+        const marker = link.style === "marker";
         const stroke = px(primary ? figureTokens.stroke.primary : figureTokens.stroke.link);
         const dash = link.style === "dashed" ? figureTokens.dash.map(px).join(" ") : undefined;
         let line = trimEnd(points, headLength * 0.8);
         if (link.both) {
           line = trimEnd(line.slice().reverse(), headLength * 0.8).reverse();
         }
-        const end = arrowHead(points[points.length - 1], points[points.length - 2]);
+        const tip = points[points.length - 1];
+        const beforeTip = points[points.length - 2];
+        const markerTip: Point = [(tip[0] * 2 + beforeTip[0]) / 3, (tip[1] * 2 + beforeTip[1]) / 3];
+        const end = arrowHead(marker ? markerTip : tip, beforeTip);
         const start = link.both ? arrowHead(points[0], points[1]) : null;
         const anchor = link.label ? labelAnchor(points) : null;
         return (
           <g key={index} color={figureTokens.link}>
-            <polyline points={pointList(line)} fill="none" stroke="currentColor" strokeWidth={stroke}
-              strokeDasharray={dash} strokeLinejoin="round" />
+            {!marker && <polyline points={pointList(line)} fill="none" stroke="currentColor" strokeWidth={stroke}
+              strokeDasharray={dash} strokeLinejoin="round" />}
             <polygon points={pointList(end)} fill="currentColor" />
             {start ? <polygon points={pointList(start)} fill="currentColor" /> : null}
             {anchor ? (

@@ -253,6 +253,9 @@ export function routeLink(link: LinkSpec, source: Rect, target: Rect, metrics: R
     const horizontal = isHorizontal(fromSide);
     if (horizontal) {
       const forward = fromSide === "right" ? end[0] - start[0] : start[0] - end[0];
+      if (forward > 0 && start[1] === end[1]) {
+        return [start, end];
+      }
       if (forward >= metrics.stub * 2) {
         const middle = (start[0] + end[0]) / 2;
         return [start, [middle, start[1]], [middle, end[1]], end];
@@ -265,6 +268,9 @@ export function routeLink(link: LinkSpec, source: Rect, target: Rect, metrics: R
       ];
     }
     const forward = fromSide === "bottom" ? end[1] - start[1] : start[1] - end[1];
+    if (forward > 0 && start[0] === end[0]) {
+      return [start, end];
+    }
     if (forward >= metrics.stub * 2) {
       const middle = (start[1] + end[1]) / 2;
       return [start, [start[0], middle], [end[0], middle], end];

@@ -5,18 +5,7 @@ import { createRoot } from "react-dom/client";
 import { docflow, errorText } from "../../backend";
 import { FigureView, type FigureReport } from "./FigureView";
 import { figureToPng } from "./exportFigure";
-import type { FigureSpec } from "./spec";
-
-export const FIGURE_LAYOUTS = {
-  auto: "由原文决定",
-  layers: "上下分层",
-  pipeline: "三段管线",
-  lanes: "阶段泳道",
-  sidebar: "主干加侧栏",
-  loop: "底部闭环",
-} as const;
-
-export type FigureLayout = keyof typeof FIGURE_LAYOUTS;
+import type { FigureLayout, FigureSpec } from "./spec";
 
 export interface FigurePlacement {
   title: string;

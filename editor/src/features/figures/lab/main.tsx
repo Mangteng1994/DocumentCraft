@@ -11,7 +11,7 @@ import "./lab.css";
 import { FigureView, type FigureReport } from "../FigureView";
 import { figureToPng } from "../exportFigure";
 import { sampleFigures } from "../samples";
-import { validateSpec } from "../spec";
+import { FIGURE_LAYOUTS, validateSpec } from "../spec";
 
 const exporting = new URLSearchParams(location.search).has("export");
 const only = new URLSearchParams(location.search).get("only");
@@ -53,7 +53,7 @@ function Lab() {
         const warnings = [...problems, ...(report?.warnings ?? [])];
         return (
           <section key={item.name} className="figure-lab-item">
-            <div className="figure-lab-head">{item.name} · {item.spec.title}</div>
+            <div className="figure-lab-head">{FIGURE_LAYOUTS[item.layout]} · {item.spec.title}</div>
             <div className={`figure-lab-report${warnings.length ? " is-warning" : ""}`}>
               {report
                 ? `${report.density} · ${report.widthPt.toFixed(0)}×${report.heightPt.toFixed(0)}pt · ${warnings.length ? warnings.join("；") : "放得下"}`

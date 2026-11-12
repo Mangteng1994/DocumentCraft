@@ -11,10 +11,10 @@ import { useAppStore } from "../../store";
 import { figureTokens } from "../../styles/tokens";
 import { StatusLine } from "../../components/Dialog";
 import { FigureTextEditor } from "../figures/FigureTextEditor";
-import type { FigureSpec } from "../figures/spec";
+import { FIGURE_LAYOUTS, type FigureLayout, type FigureSpec } from "../figures/spec";
 import {
-  FIGURE_LAYOUTS, figureStage, prepareCandidate, rasterizeCandidate, refineFigure,
-  type FigureAnalysis, type FigureCandidate, type FigureLayout, type FigureSession,
+  figureStage, prepareCandidate, rasterizeCandidate, refineFigure,
+  type FigureAnalysis, type FigureCandidate, type FigureSession,
 } from "../figures/workflow";
 import { aiDestination, loadAiStatus } from "./aiStatus";
 import { SettingHeading, SettingItem, Toggle } from "./SettingsModal";
