@@ -117,7 +117,7 @@ sidecar 输出到 `out/sidecar/`。`npm run bundle` 调用 `scripts/bundle-edito
 
 「分阶段模型与视觉复核」可分别填图位规划、单图生成和视觉复核的模型 ID。留空使用当前连接的默认模型。视觉复核默认关闭，开启后会将候选图和该图的取证段落发给支持图片输入的模型，最多两轮。
 
-开发时可在 Vite 的 `/figure-lab.html` 查看七个组件树样张。随 sidecar 内置的 `core/src/documentcraft/figure_skill.md` 包含三阶段提示词和版式示例，图的外观令牌定义在 `editor/src/styles/tokens.ts`。不带 `--stage` 的 `docflow illustrate` 继续提供独立的命令行配图入口。
+在候选图的「调整版式」中可选分层总体架构、四栏接入与治理、纵向组织与双支路、纵向主干与场景侧栏、输入—分析—输出路线、横向阶段流程、三栏路线与底部闭环，也可由原文决定。开发时可在 Vite 的 `/figure-lab.html` 按参考图顺序查看七个样张。三阶段提示词和版式示例随 sidecar 内置于 `core/src/documentcraft/figure_skill.md`，图的外观令牌定义在 `editor/src/styles/tokens.ts`。不带 `--stage` 的 `docflow illustrate` 提供独立的命令行配图入口。
 
 审核清单区分「有引用但缺图」「原文适合新增」「已有实图」「待确认」，并分开记录插入位置和取证范围。图名和「如下图所示」是引用线索，只有原稿中的实图位置才能用于覆盖判断。节选按实际标题层级盘点全文总览、场景路线和细节机制，可以在章节概述后插图，同时从后续段落或表格取证。
 

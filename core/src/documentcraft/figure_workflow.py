@@ -20,8 +20,14 @@ from .illustration import (
 from .templates import ConversionError
 
 LAYOUTS = {
-    "auto": "由原文决定", "layers": "上下分层", "pipeline": "三段管线",
-    "lanes": "阶段泳道", "sidebar": "主干加侧栏", "loop": "底部闭环",
+    "auto": "由原文决定",
+    "layers": "分层总体架构",
+    "pipeline": "四栏接入与治理",
+    "branch": "纵向组织与双支路",
+    "sidebar": "纵向主干与场景侧栏",
+    "route": "输入—分析—输出路线",
+    "lanes": "横向阶段流程",
+    "loop": "三栏路线与底部闭环",
 }
 TONES = "blue teal green sand lilac rose gray"
 ICONS = (
@@ -29,7 +35,7 @@ ICONS = (
     "chip camera video radar layers shield scan cloud users server network brain branch workflow "
     "search activity gauge worker construction water temperature checklist file-check route"
 )
-LIMITS = {"depth": 8, "blocks": 90, "children": 12, "across": 4, "links": 20}
+LIMITS = {"depth": 8, "blocks": 90, "children": 12, "across": 6, "links": 20}
 WORKERS = 3
 PNG_LIMIT = 16_000_000
 PIXEL_LIMIT = 30_000_000
@@ -54,19 +60,19 @@ BLOCK_FIELDS = {
     },
     "group": {**STACK_FIELDS, **HEADING_FIELDS},
     "card": {
-        **TONE_FIELD, "title*": "text:22", "detail": "detail", "icon": f"enum:{ICONS}",
-        "tags": "tags", "variant": "enum:filled outline banner note",
+        **TONE_FIELD, "title*": "text:32", "detail": "detail", "icon": f"enum:{ICONS}",
+        "tags": "tags", "variant": "enum:filled outline banner note label",
     },
     "decision": {**TONE_FIELD, "text*": "text:16"},
     "arrow": {
-        "direction*": "enum:up down left right", "style": "enum:solid hollow", "label": "text:12",
+        "direction*": "enum:up down left right", "style": "enum:solid hollow open", "label": "text:12",
         "evidence*": "text:220",
     },
 }
 LINK_FIELDS = {
     "from*": "id", "to*": "id",
     "fromSide": "enum:top bottom left right", "toSide": "enum:top bottom left right",
-    "fromAt": "ratio", "toAt": "ratio", "style": "enum:flow primary dashed",
+    "fromAt": "ratio", "toAt": "ratio", "style": "enum:flow primary dashed marker",
     "both": "bool", "label": "text:12", "evidence*": "text:220",
 }
 
@@ -86,10 +92,10 @@ def _spec_instructions(section: str) -> str:
     return (
         f"{guide[section]}\n{guide['版式示例']}\n"
         "组件和连线是 JSON 对象。组件另有必填 kind，取组件表的键。字段名末尾星号表示必填，"
-        "键名不带星号。blocks 为非空组件数组，weights 为非箭头子项对应的 1–4 整数比例数组，"
-        "columns 为 1–4 的整数，ratio 为 0–1 的数字，bool 为布尔值。"
+        "键名不带星号。blocks 为非空组件数组，weights 为非箭头子项对应的 1–8 整数比例数组，"
+        "columns 为 1–6 的整数，ratio 为 0–1 的数字，bool 为布尔值。"
         "id 使用字母、数字、下划线或连字符，首字符为字母。enum 只取冒号后列出的一项。"
-        "detail 为最多 42 字的字符串，或最多两条这样的说明。tags 最多三项，每项最多 12 字。"
+        "detail 为最多 42 字的字符串，或最多三条这样的说明。tags 最多三项，每项最多 12 字。"
         "labels 可用 null 跳过，数组长度为子项数减一，其余每项最多 12 字。"
         "箭头和连线的 evidence 是可核对该关系的逐字引文。chain 的 evidence（quotes）是引文数组，"
         "每对相邻子项按顺序各填一条，单条最多 220 字。引文只供校验，不显示在图中。\n"
@@ -174,7 +180,7 @@ class SpecValidator:
                 self.text(item, int(rule.split(":")[1]), field)
             elif rule in {"detail", "tags", "labels", "quotes"}:
                 values = [item] if rule == "detail" and isinstance(item, str) else item
-                limits = {"detail": (2, 42), "tags": (3, 12), "labels": (LIMITS["children"] - 1, 12),
+                limits = {"detail": (3, 42), "tags": (3, 12), "labels": (LIMITS["children"] - 1, 12),
                           "quotes": (LIMITS["children"] - 1, 220)}
                 count, length = limits[rule]
                 if not isinstance(values, list) or len(values) > count:
@@ -198,7 +204,7 @@ class SpecValidator:
         elif rule == "ratio":
             valid = type(item) in (int, float) and 0 <= item <= 1
         else:
-            valid = isinstance(item, list) and all(type(number) is int and 1 <= number <= 4 for number in item)
+            valid = isinstance(item, list) and all(type(number) is int and 1 <= number <= 8 for number in item)
         if not valid:
             raise ConversionError(f"{field}超出允许的值域（{rule}）。")
 
@@ -265,9 +271,12 @@ class SpecValidator:
                 raise ConversionError("连线引用了不存在的组件 ID。")
             if start[:len(end)] == end or end[:len(start)] == start:
                 raise ConversionError("连线两端不能是同一组件或彼此包含的组件。")
-            if pair in seen:
+            key = pair
+            if link.get("style") == "marker":
+                key = (*pair, link.get("fromAt", 0.5), link.get("toAt", 0.5))
+            if key in seen:
                 raise ConversionError("两组件之间有重复连线。")
-            seen.add(pair)
+            seen.add(key)
 
 
 def validate_spec(value: object, evidence: list[dict], title: str, width: float) -> dict:
@@ -314,7 +323,9 @@ def plan_figures(source: Path, settings: AISettings, options: dict) -> dict:
             raise ConversionError("读取期间源报告已变动，请重新分析。")
         cues = _figure_cues(blocks)
         payload = _plan_payload(blocks, cues, _report_outline(blocks))
-        instructions = _guide()["规划"] + "\nJSON Schema:\n" + json.dumps(_plan_schema(), ensure_ascii=False)
+        guide = _guide()
+        instructions = f"{guide['规划']}\n{guide['版式示例']}\nJSON Schema:\n"
+        instructions += json.dumps(_plan_schema(), ensure_ascii=False)
         plan = validate_plan(request_json(_stage_model(settings, options, "plannerModel"), instructions, payload))
         generator = _stage_model(settings, options, "figureModel")
 
@@ -344,7 +355,7 @@ def plan_figures(source: Path, settings: AISettings, options: dict) -> dict:
 
 def _context(diagram: dict, blocks: list[ReportBlock], width: float, height: float, layout: str) -> dict:
     return {
-        "title": diagram["title"], "type": diagram["type"], "layout": LAYOUTS[layout],
+        "title": diagram["title"], "type": diagram["type"], "layout": layout, "layout_name": LAYOUTS[layout],
         "width_pt": width, "max_height_pt": height, "evidence": _evidence(diagram, blocks),
     }
 

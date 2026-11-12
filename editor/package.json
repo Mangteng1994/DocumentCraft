@@ -1,7 +1,7 @@
 {
   "name": "documentcraft-editor",
   "private": true,
-  "version": "0.2.8",
+  "version": "0.2.9",
   "description": "DocumentCraft 阅读编辑器（基于 VMark 编辑核心精简）",
   "type": "module",
   "scripts": {

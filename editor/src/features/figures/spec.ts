@@ -11,6 +11,20 @@ export type Gap = keyof typeof figureTokens.gap;
 export type Direction = "up" | "down" | "left" | "right";
 export type Side = "top" | "bottom" | "left" | "right";
 
+/** 科研配图的版式 ID 与显示名，对应 sidecar 的 LAYOUTS。 */
+export const FIGURE_LAYOUTS = {
+  auto: "由原文决定",
+  layers: "分层总体架构",
+  pipeline: "四栏接入与治理",
+  branch: "纵向组织与双支路",
+  sidebar: "纵向主干与场景侧栏",
+  route: "输入—分析—输出路线",
+  lanes: "横向阶段流程",
+  loop: "三栏路线与底部闭环",
+} as const;
+
+export type FigureLayout = keyof typeof FIGURE_LAYOUTS;
+
 /** 卡片可用的图标语义名，对应 icons.ts 里的 lucide 图标。 */
 export const FIGURE_ICONS = [
   "drone", "image", "model", "location", "document", "calendar", "chart", "terrain", "grid",
@@ -90,7 +104,7 @@ export interface GroupBlock extends Base {
 
 /**
  * 卡片：标题加可选说明、图标和底部标签。tone 缺省时继承所在面板的色调。
- * variant：filled 实心（默认），outline 白底描边，banner 大号标题横条，note 说明条（常规字重）。
+ * variant：filled 加粗标题（默认），label 常规字重，outline 白底描边，banner 标题横带，note 说明条。
  */
 export interface CardBlock extends Base {
   kind: "card";
@@ -99,7 +113,7 @@ export interface CardBlock extends Base {
   icon?: FigureIcon;
   tags?: string[];
   tone?: FigureTone;
-  variant?: "filled" | "outline" | "banner" | "note";
+  variant?: "filled" | "outline" | "banner" | "note" | "label";
 }
 
 /** 判断菱形，出口用连线或顺序链的箭头文字（如「是」「否」）表达。 */
@@ -113,7 +127,7 @@ export interface DecisionBlock extends Base {
 export interface ArrowBlock extends Base {
   kind: "arrow";
   direction: Direction;
-  style?: "solid" | "hollow";
+  style?: "solid" | "hollow" | "open";
   label?: string;
   evidence?: string;
 }
@@ -140,7 +154,8 @@ export interface LinkSpec {
   toSide?: Side;
   fromAt?: number;
   toAt?: number;
-  style?: "flow" | "primary" | "dashed";
+  /** marker 用于横带间仅显示三角箭头的层间连接。 */
+  style?: "flow" | "primary" | "dashed" | "marker";
   /** 两端都有箭头。 */
   both?: boolean;
   label?: string;
