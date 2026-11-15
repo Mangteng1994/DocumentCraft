@@ -18,12 +18,16 @@ foreach ($name in "DocumentCraft-cli.exe", "builtin-template.docx", "WebView2Loa
 # The updater signs the installer with a minisign private key. Without it the build would
 # produce an installer that installed copies can never update to, so stop early.
 # Generate once with: npx tauri signer generate -w $env:USERPROFILE\.tauri\documentcraft.key
-if (-not $env:TAURI_SIGNING_PRIVATE_KEY -and -not $env:TAURI_SIGNING_PRIVATE_KEY_PATH) {
+# `tauri build` reads TAURI_SIGNING_PRIVATE_KEY (key text or a path to the key file). The *_PATH variant
+# only belongs to `tauri signer sign` and is ignored by the bundler ("public key found, but no private key").
+if (-not $env:TAURI_SIGNING_PRIVATE_KEY) {
     $defaultKey = Join-Path $env:USERPROFILE ".tauri\documentcraft.key"
-    if (Test-Path $defaultKey) {
-        $env:TAURI_SIGNING_PRIVATE_KEY_PATH = $defaultKey
+    if ($env:TAURI_SIGNING_PRIVATE_KEY_PATH -and (Test-Path $env:TAURI_SIGNING_PRIVATE_KEY_PATH)) {
+        $env:TAURI_SIGNING_PRIVATE_KEY = $env:TAURI_SIGNING_PRIVATE_KEY_PATH
+    } elseif (Test-Path $defaultKey) {
+        $env:TAURI_SIGNING_PRIVATE_KEY = $defaultKey
     } else {
-        Write-Error "No updater signing key. Set TAURI_SIGNING_PRIVATE_KEY(_PATH) or create $defaultKey (see README)."
+        Write-Error "No updater signing key. Set TAURI_SIGNING_PRIVATE_KEY or create $defaultKey (see README)."
         exit 1
     }
 }
