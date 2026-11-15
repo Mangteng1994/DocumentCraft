@@ -2512,3 +2512,211 @@ body.is-resizing {
   font-size: var(--dc-font-size-xs);
   line-height: var(--dc-line-height-ui);
 }
+
+/* 文件树右键菜单：剪切的条目置灰（DC-064） */
+.dc-tree-row.is-cut {
+  opacity: var(--dc-opacity-disabled);
+}
+
+/* 属性窗口（DC-064） */
+.dc-props {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dc-space-md);
+  margin: 0;
+}
+
+.dc-props-row {
+  display: grid;
+  grid-template-columns: var(--dc-size-props-label) 1fr;
+  gap: var(--dc-space-lg);
+}
+
+.dc-props-label {
+  color: var(--dc-color-ink-muted);
+}
+
+.dc-props-value {
+  margin: 0;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+/* 状态栏工作区菜单：最近文件夹的移除按钮（DC-065），悬停或键盘聚焦该行时才显示 */
+.dc-workspace-row {
+  display: flex;
+  align-items: center;
+  gap: var(--dc-space-xs);
+}
+
+.dc-workspace-row .dc-workspace-item {
+  flex: 1;
+  min-width: 0;
+}
+
+.dc-workspace-remove {
+  opacity: 0;
+}
+
+.dc-workspace-row:hover .dc-workspace-remove,
+.dc-workspace-row:focus-within .dc-workspace-remove {
+  opacity: 1;
+}
+
+/* 搜索结果预览页（DC-066） */
+.dc-preview {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--dc-color-surface-raised);
+}
+
+.dc-preview-header {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--dc-space-lg);
+  min-height: var(--dc-size-header);
+  padding: 0 var(--dc-space-xl);
+  border-bottom: var(--dc-border);
+}
+
+.dc-preview-title-row {
+  display: flex;
+  align-items: center;
+  gap: var(--dc-space-md);
+  min-width: 0;
+}
+
+.dc-preview-title {
+  margin: 0;
+  overflow: hidden;
+  font-size: var(--dc-font-size-title);
+  font-weight: var(--dc-font-weight-bold);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.dc-preview-actions {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: var(--dc-space-sm);
+}
+
+.dc-preview-meta {
+  flex-shrink: 0;
+  padding: var(--dc-space-md) var(--dc-space-xl);
+  border-bottom: var(--dc-border);
+  color: var(--dc-color-ink-muted);
+  font-size: var(--dc-font-size-sm);
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.dc-preview-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: var(--dc-space-xl);
+}
+
+.dc-preview-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--dc-space-lg);
+  margin: 0 0 var(--dc-space-lg);
+  color: var(--dc-color-ink-muted);
+  font-size: var(--dc-font-size-md);
+}
+
+.dc-preview-nav {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: var(--dc-space-xs);
+}
+
+.dc-preview-nav-count {
+  min-width: var(--dc-size-preview-count);
+  text-align: center;
+  font-size: var(--dc-font-size-sm);
+}
+
+.dc-preview-section {
+  margin-bottom: var(--dc-space-xl);
+  padding: var(--dc-space-lg);
+  border: var(--dc-border);
+  border-radius: var(--dc-radius-md);
+}
+
+.dc-preview-blocks {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dc-space-lg);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.dc-preview-block {
+  padding: var(--dc-space-lg);
+  border: var(--dc-border);
+  border-radius: var(--dc-radius-md);
+}
+
+.dc-preview-block.is-focus {
+  border-color: var(--dc-color-accent);
+  background: var(--dc-color-accent-soft);
+}
+
+.dc-preview-block-head {
+  display: flex;
+  align-items: center;
+  gap: var(--dc-space-md);
+  margin-bottom: var(--dc-space-sm);
+  color: var(--dc-color-ink-muted);
+  font-size: var(--dc-font-size-xs);
+}
+
+.dc-preview-locator {
+  font-weight: var(--dc-font-weight-medium);
+}
+
+.dc-preview-tag {
+  padding: 0 var(--dc-space-sm);
+  border-radius: var(--dc-radius-pill);
+  background: var(--dc-color-accent-soft);
+  color: var(--dc-color-accent-text);
+}
+
+.dc-preview-line {
+  margin: 0;
+  font-size: var(--dc-font-size-body);
+  line-height: var(--dc-line-height-body);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.dc-preview-line.is-heading {
+  font-weight: var(--dc-font-weight-bold);
+}
+
+/* 预览页的核心就是看清命中的文字，用文本高亮色而不是侧栏结果里的淡紫色 */
+.dc-preview .dc-search-hit {
+  background: var(--dc-color-annotation);
+}
+
+.dc-preview-context {
+  margin: 0;
+  color: var(--dc-color-ink-faint);
+  font-size: var(--dc-font-size-md);
+  line-height: var(--dc-line-height-ui);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

@@ -94,7 +94,7 @@ cd editor
 npx tauri signer generate -w $env:USERPROFILE\.tauri\documentcraft.key
 ```
 
-把输出的公钥填入 `editor/src-tauri/tauri.conf.json` 的 `plugins.updater.pubkey`。`npm run bundle` 会读取 `%USERPROFILE%\.tauri\documentcraft.key`（或环境变量 `TAURI_SIGNING_PRIVATE_KEY(_PATH)`）；私钥设了密码时再设置 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`。
+把输出的公钥填入 `editor/src-tauri/tauri.conf.json` 的 `plugins.updater.pubkey`。`npm run bundle` 会读取 `%USERPROFILE%\.tauri\documentcraft.key`（或环境变量 `TAURI_SIGNING_PRIVATE_KEY`（密钥内容或私钥文件路径））；私钥设了密码时再设置 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`。
 
 发布一个新版本：同步修改 `tauri.conf.json`、`Cargo.toml`、`package.json` 三处版本号，执行 `npm run bundle`，再运行发布脚本。脚本先生成 `out/release/latest.json`，确认后用 `gh` 创建 Release `vX.Y.Z` 并上传安装包与 `latest.json`：
 
@@ -197,3 +197,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-sidecar.ps1
 ```
 
 设置 `DOCUMENTCRAFT_TEST_EXE` 为复制到隔离目录的命令行版 EXE 路径，再运行同一个测试命令。测试会为每次 EXE 调用清空 PATH。源码版可通过 `docflow md-to-word` 调用，参数与命令行 EXE 版相同。
+
+## 致谢与参考
+
+- 搜索结果预览页（DC-066）和文本编码识别参考了开源项目 [pivotsearch](https://github.com/alrece/pivotsearch)（Apache-2.0，AnyTXT 的开源替代品）：用 `chardetng` + `encoding_rs` 识别 GBK、Big5 等编码，选中结果后在预览区高亮命中并可逐个切换。代码为本项目自行实现，仅采用其做法。
+- AnyTXT Searcher 是闭源免费软件，未采用其代码。

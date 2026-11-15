@@ -6,7 +6,9 @@
 
 mod docflow;
 mod extract;
+mod fileops;
 mod images;
+mod preview;
 mod settings;
 mod textindex;
 mod workspace;
@@ -87,6 +89,11 @@ pub fn run() {
             workspace::remove_markdown,
             workspace::search_workspace,
             workspace::index_workspace,
+            fileops::file_properties,
+            fileops::copy_entry,
+            fileops::move_entry,
+            fileops::trash_entry,
+            preview::preview_file,
             images::store_image,
             images::import_image,
             settings::load_settings,

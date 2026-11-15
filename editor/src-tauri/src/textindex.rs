@@ -14,7 +14,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-use crate::extract::{doc_kind, extract_text, is_markdown_file, DocKind, MAX_DOCUMENT_BYTES, MAX_TEXT_FILE_BYTES};
+use crate::extract::{doc_kind, extract_text, is_markdown_file, DocKind, LEGACY_NON_UTF8_ERROR, MAX_DOCUMENT_BYTES, MAX_TEXT_FILE_BYTES};
 
 /// 解析文档时最多同时使用的线程数。
 const MAX_WORKERS: usize = 4;
@@ -305,7 +305,9 @@ fn load_entry(
     }
     let cache_path = cache_dir.join(cache_name(key));
     if let Some(cached) = read_cache(&cache_path) {
-        if cached.path.eq_ignore_ascii_case(key) && cached.mtime == rec.mtime && cached.size == rec.size {
+        // 旧版本缓存的「不是 UTF-8」错误已经过时（现在能识别 GBK 等编码），不复用，重新解析。
+        let outdated_error = cached.error.as_deref() == Some(LEGACY_NON_UTF8_ERROR);
+        if cached.path.eq_ignore_ascii_case(key) && cached.mtime == rec.mtime && cached.size == rec.size && !outdated_error {
             return Arc::new(DocEntry::new(kind, cached.text, cached.error));
         }
     }

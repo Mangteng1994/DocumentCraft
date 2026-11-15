@@ -230,6 +230,75 @@ export function removeMarkdown(path: string): Promise<void> {
   return invoke<void>("remove_markdown", { path });
 }
 
+/** 文件或文件夹的属性（DC-064）。时间为 Unix 毫秒。 */
+export interface FileProperties {
+  name: string;
+  path: string;
+  folder: string;
+  is_dir: boolean;
+  extension: string;
+  size: number;
+  files: number;
+  folders: number;
+  /** 文件夹太大，统计中途停止，数字只是下限。 */
+  partial: boolean;
+  created: number | null;
+  modified: number | null;
+  accessed: number | null;
+  readonly: boolean;
+}
+
+export function fileProperties(path: string): Promise<FileProperties> {
+  return invoke<FileProperties>("file_properties", { path });
+}
+
+/** 复制到目标文件夹，重名时自动改名，返回新路径。 */
+export function copyEntry(source: string, targetDir: string): Promise<string> {
+  return invoke<string>("copy_entry", { source, targetDir });
+}
+
+/** 移动到目标文件夹，重名时自动改名，返回新路径。 */
+export function moveEntry(source: string, targetDir: string): Promise<string> {
+  return invoke<string>("move_entry", { source, targetDir });
+}
+
+/** 移入回收站。 */
+export function trashEntry(path: string): Promise<void> {
+  return invoke<void>("trash_entry", { path });
+}
+
+/** 搜索结果预览中的一个命中块（DC-066）。 */
+export interface PreviewBlock {
+  locator: string;
+  /** Markdown 标题级别 1～6，不是标题为 0。 */
+  heading_level: number;
+  context_before: string;
+  text: string;
+  /** 命中文字在 text 中的范围：[起始字符序号, 字符数]。 */
+  ranges: [number, number][];
+  cut_start: boolean;
+  cut_end: boolean;
+  context_after: string;
+}
+
+export interface FilePreview {
+  path: string;
+  name: string;
+  /** markdown、text、docx、xlsx、pptx、pdf 或 other。 */
+  kind: string;
+  size: number;
+  name_ranges: [number, number][];
+  blocks: PreviewBlock[];
+  total_hits: number;
+  truncated: boolean;
+  /** 无法显示正文的原因。 */
+  note: string;
+}
+
+export function previewFile(path: string, query: string, mode: string): Promise<FilePreview> {
+  return invoke<FilePreview>("preview_file", { path, query, mode });
+}
+
 export function cancelDocflow(job: string): Promise<void> {
   return invoke<void>("docflow_cancel", { job });
 }

@@ -19,7 +19,7 @@ const TEXT_EXTENSIONS: [&str; 44] = [
 /// 读取纯文本正文的文件大小上限。更大的文件只按文件名搜索。
 pub const MAX_TEXT_FILE_BYTES: u64 = 4 * 1024 * 1024;
 
-/// 扩展名属于可按纯文本读取的类型。只按扩展名判断，不嗅探内容：不是 UTF-8 的文件读取会失败，只能按文件名匹配。
+/// 扩展名属于可按纯文本读取的类型。只按扩展名判断，不嗅探内容；实际读取时由 `decode_text_bytes` 识别编码（UTF-8、GBK、Big5 等），识别不了的只能按文件名匹配。
 pub fn is_text_file(path: &Path) -> bool {
     let extension = path.extension().and_then(|value| value.to_str());
     match extension {
@@ -441,15 +441,49 @@ fn truncate_on_boundary(mut text: String, limit: usize) -> String {
     text
 }
 
-/// 读取 UTF-8 纯文本，去掉 BOM。不是 UTF-8 或文件过大时返回错误。
+/// 旧版本在读不了非 UTF-8 文本时缓存的错误说明。新版能识别 GBK 等编码，带这个错误的旧缓存必须作废重读，
+/// 否则文件的修改时间和大小没变，旧缓存会让这些文件一直搜不到正文。
+pub const LEGACY_NON_UTF8_ERROR: &str = "不是 UTF-8 编码的文本。";
+
+/// 把文本文件的字节解码成 UTF-8 字符串，供搜索、索引和预览共用。
+///
+/// 做法参考开源项目 pivotsearch（Apache-2.0，https://github.com/alrece/pivotsearch）的文本解析：
+/// 先按 UTF-8 严格解码；失败再用 chardetng（Firefox 同款）检测 GBK、GB18030、Big5、Shift_JIS 等遗留编码，
+/// 由 encoding_rs 转成 UTF-8。带 BOM 的 UTF-16 也能读。
+/// 含空字节（多半是二进制）或转码出现替换字符时返回 None，该文件只能按文件名匹配，
+/// 避免把二进制文件当成乱码文本建立索引。
+pub fn decode_text_bytes(bytes: &[u8]) -> Option<String> {
+    if let Ok(text) = std::str::from_utf8(bytes) {
+        return Some(text.strip_prefix('\u{feff}').unwrap_or(text).to_string());
+    }
+    // 有 BOM 的数据（UTF-16 等）按 BOM 指明的编码解码，decode 会自动去掉 BOM。
+    if let Some((encoding, _)) = encoding_rs::Encoding::for_bom(bytes) {
+        let (text, _, had_errors) = encoding.decode(bytes);
+        return if had_errors { None } else { Some(text.into_owned()) };
+    }
+    if bytes.contains(&0) {
+        return None;
+    }
+    let mut detector = chardetng::EncodingDetector::new(chardetng::Iso2022JpDetection::Deny);
+    detector.feed(bytes, true);
+    // 前面已确认不是合法 UTF-8，所以检测时排除 UTF-8。
+    let encoding = detector.guess(None, chardetng::Utf8Detection::Deny);
+    let (text, _, had_errors) = encoding.decode(bytes);
+    if had_errors {
+        None
+    } else {
+        Some(text.into_owned())
+    }
+}
+
+/// 读取纯文本，自动识别编码。文件过大或编码无法识别时返回错误。
 fn extract_plain_text(path: &Path) -> Result<String, String> {
     let size = fs::metadata(path).map_err(|error| format!("无法读取：{error}"))?.len();
     if size > MAX_TEXT_FILE_BYTES {
         return Err("文件过大，已跳过正文。".to_string());
     }
     let bytes = fs::read(path).map_err(|error| format!("无法读取：{error}"))?;
-    let text = String::from_utf8(bytes).map_err(|_| "不是 UTF-8 编码的文本。".to_string())?;
-    Ok(text.strip_prefix('\u{feff}').unwrap_or(&text).to_string())
+    decode_text_bytes(&bytes).ok_or_else(|| "无法识别的文本编码，或不是文本文件。".to_string())
 }
 
 /// 提取文档正文。文件过大、类型不支持或解析失败时返回错误；扫描件没有文字层时返回空文本。
@@ -568,6 +602,36 @@ mod tests {
             }
             Err(error) => println!("耗时 {elapsed:?}，失败：{error}"),
         }
+    }
+
+    #[test]
+    fn text_bytes_are_decoded_from_utf8_gbk_and_utf16() {
+        assert_eq!(decode_text_bytes("Hello 世界".as_bytes()).unwrap(), "Hello 世界");
+        assert_eq!(decode_text_bytes("\u{feff}带 BOM".as_bytes()).unwrap(), "带 BOM");
+
+        // 统计式的编码检测需要足够长的样本，用一段真实长度的中文做 GBK 往返。
+        let sample = "检测报告：样品经过两道程序检测与复核，结果合格，符合国家标准的要求。";
+        let (gbk, _, _) = encoding_rs::GBK.encode(sample);
+        assert_eq!(decode_text_bytes(&gbk).unwrap(), sample);
+
+        let mut utf16 = vec![0xFF, 0xFE];
+        for unit in "你好a".encode_utf16() {
+            utf16.extend_from_slice(&unit.to_le_bytes());
+        }
+        assert_eq!(decode_text_bytes(&utf16).unwrap(), "你好a");
+
+        // 含空字节的数据按二进制处理，不当作文本。
+        assert!(decode_text_bytes(&[0x00, 0x01, 0x02, 0xFF]).is_none());
+    }
+
+    #[test]
+    fn gbk_text_file_is_extracted() {
+        let path = std::env::temp_dir().join(format!("documentcraft-extract-{}-gbk.txt", std::process::id()));
+        let sample = "测试记录：本批样品检测合格，已经复核并归档保存。";
+        let (gbk, _, _) = encoding_rs::GBK.encode(sample);
+        fs::write(&path, &*gbk).unwrap();
+        assert_eq!(extract_text(&path).unwrap(), sample);
+        let _ = fs::remove_file(&path);
     }
 
     #[test]

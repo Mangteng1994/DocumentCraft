@@ -1,6 +1,7 @@
 /**
- * 工作区文件树。行样式与交互参照 VMark FileExplorer/FileNode，去掉了右键菜单、
- * 重命名、拖放和文件监听，保留浏览、打开、全部折叠与全部展开，以及在选中文件夹下新建 Markdown 和文件夹。
+ * 工作区文件树。行样式与交互参照 VMark FileExplorer/FileNode，去掉了重命名、拖放和文件监听，
+ * 保留浏览、打开、全部折叠与全部展开，以及在选中文件夹下新建 Markdown 和文件夹；
+ * 右键菜单提供复制、剪切、粘贴、删除、复制完整文件地址和属性（DC-064）。
  * 工作区很大（网络共享、数万文件）时目录树按需加载：打开时只读顶层，展开哪个文件夹才读取哪个。
  */
 
@@ -11,6 +12,7 @@ import { chooseWorkspace, createFolderIn, createNote, loadFolder, openDocument, 
 import { relativePath } from "../paths";
 import { useAppStore } from "../store";
 import { iconSize, iconStroke } from "../styles/tokens";
+import { TreeContextMenu, type TreeMenuState } from "./TreeContextMenu";
 
 const MARKDOWN_NAME = /\.(md|markdown)$/i;
 
@@ -50,16 +52,19 @@ interface RowProps {
   selectedDir: string | null;
   onToggle: (path: string) => void;
   onSelectDir: (path: string) => void;
+  onContextMenu: (x: number, y: number, node: TreeNode) => void;
 }
 
-const TreeRow = memo(function TreeRow({ node, depth, activePath, expanded, selectedDir, onToggle, onSelectDir }: RowProps) {
+const TreeRow = memo(function TreeRow({ node, depth, activePath, expanded, selectedDir, onToggle, onSelectDir, onContextMenu }: RowProps) {
+  // 剪切的条目置灰，提示它粘贴后会被移走。
+  const isCut = useAppStore((state) => state.fileClipboard?.mode === "cut" && state.fileClipboard.path === node.path);
   const isOpen = expanded.has(node.path);
   const isActive = node.path === activePath;
   const isTarget = node.is_dir && node.path === selectedDir;
   // 开启「显示所有文件」后出现的非 Markdown 文件：置灰，点击用系统默认应用打开。
   const isOther = !node.is_dir && !MARKDOWN_NAME.test(node.name);
   const indent = { "--dc-tree-depth": depth } as React.CSSProperties;
-  const className = ["dc-tree-row", isActive ? "is-active" : "", isTarget ? "is-target" : "", isOther ? "is-other" : ""]
+  const className = ["dc-tree-row", isActive ? "is-active" : "", isTarget ? "is-target" : "", isOther ? "is-other" : "", isCut ? "is-cut" : ""]
     .filter(Boolean)
     .join(" ");
 
@@ -87,6 +92,12 @@ const TreeRow = memo(function TreeRow({ node, depth, activePath, expanded, selec
         style={indent}
         title={node.path}
         onClick={handleActivate}
+        onContextMenu={(event) => {
+          // 阻止冒泡：空白处的右键菜单由外层容器处理，行上的菜单以该行为对象。
+          event.preventDefault();
+          event.stopPropagation();
+          onContextMenu(event.clientX, event.clientY, node);
+        }}
         onKeyDown={(event) => {
           if (event.key === "Enter" || event.key === " ") {
             event.preventDefault();
@@ -125,6 +136,7 @@ const TreeRow = memo(function TreeRow({ node, depth, activePath, expanded, selec
               selectedDir={selectedDir}
               onToggle={onToggle}
               onSelectDir={onSelectDir}
+              onContextMenu={onContextMenu}
             />
           ))}
         </ul>
@@ -146,6 +158,8 @@ export function FileTree() {
   const [selectedDir, setSelectedDir] = useState<string | null>(null);
   const [creating, setCreating] = useState<CreateKind | null>(null);
   const [draftName, setDraftName] = useState("");
+  // 右键菜单：位置和右键的条目，空白处右键时 node 为 null。
+  const [menu, setMenu] = useState<TreeMenuState | null>(null);
   // 正在读取的文件夹，避免同一个文件夹被重复请求。
   const loading = useRef<Set<string>>(new Set());
 
@@ -174,6 +188,12 @@ export function FileTree() {
       return next;
     });
   }, []);
+
+  const openMenu = useCallback((x: number, y: number, node: TreeNode | null) => {
+    setMenu({ x, y, node });
+  }, []);
+
+  const closeMenu = useCallback(() => setMenu(null), []);
 
   const targetDir = selectedDir ?? tree?.path ?? "";
 
@@ -231,7 +251,13 @@ export function FileTree() {
   const targetLabel = relativePath(tree.path, targetDir) || "工作区根目录";
 
   return (
-    <div className="dc-tree">
+    <div
+      className="dc-tree"
+      onContextMenu={(event) => {
+        event.preventDefault();
+        openMenu(event.clientX, event.clientY, null);
+      }}
+    >
       <div className="dc-sidebar-header">
         <span className="dc-sidebar-title" title={tree.path}>
           {tree.name}
@@ -303,10 +329,12 @@ export function FileTree() {
               selectedDir={selectedDir}
               onToggle={handleToggle}
               onSelectDir={setSelectedDir}
+              onContextMenu={openMenu}
             />
           ))}
         </ul>
       )}
+      {menu && <TreeContextMenu menu={menu} rootPath={tree.path} onClose={closeMenu} />}
     </div>
   );
 }

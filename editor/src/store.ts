@@ -7,14 +7,32 @@ import { create } from "zustand";
 import type { IndexProgress, TreeNode } from "./backend";
 import type { Note } from "./editor/annotations";
 import type { HeadingItem } from "@vmark/utils/markdownOutline";
+import type { SearchMode } from "./settings/schema";
 
 export type SidebarView = "files" | "outline";
 export type RightPanel = "comments" | "copilot" | null;
 export type SettingsTab = "appearance" | "files" | "hotkeys" | "copilot" | "ai" | "word" | "figure" | "update";
 
-/** 浮层：设置、插入表格、Quick Ask。同一时刻只显示一个。 */
+/** 文件树里复制或剪切的条目（只在应用内记录，粘贴时由后端复制或移动）。 */
+export interface FileClipboard {
+  path: string;
+  mode: "copy" | "cut";
+}
+
+/** 搜索结果预览页要显示的文件和搜索条件（DC-066）。 */
+export interface SearchPreviewTarget {
+  path: string;
+  name: string;
+  query: string;
+  mode: SearchMode;
+  /** 点击的是哪一处匹配（位置说明，如「第 3 页」），预览页据此滚动到对应命中；点击文件行时为空。 */
+  focusLocator: string;
+}
+
+/** 浮层：设置、插入表格、Quick Ask、文件属性。同一时刻只显示一个。 */
 export type Overlay =
   | { kind: "settings"; tab: SettingsTab }
+  | { kind: "properties"; path: string }
   | { kind: "insertTable" }
   | { kind: "quickAsk"; commandName?: string }
   | null;
@@ -79,6 +97,10 @@ export interface AppState {
   /** 兼容 API 的 Key 只保存在本次会话内存中。 */
   apiKey: string;
   status: string;
+  /** 文件树里复制或剪切的条目。 */
+  fileClipboard: FileClipboard | null;
+  /** 搜索结果预览页，null 表示没有打开。 */
+  preview: SearchPreviewTarget | null;
 
   setWorkspace: (workspace: string | null, tree: TreeNode | null) => void;
   setTree: (tree: TreeNode | null) => void;
@@ -105,6 +127,8 @@ export interface AppState {
   setIndexProgress: (progress: IndexProgress | null, refresh: boolean) => void;
   setApiKey: (key: string) => void;
   setStatus: (status: string) => void;
+  setFileClipboard: (clipboard: FileClipboard | null) => void;
+  setPreview: (preview: SearchPreviewTarget | null) => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -129,6 +153,8 @@ export const useAppStore = create<AppState>((set) => ({
   indexVersion: 0,
   apiKey: "",
   status: "",
+  fileClipboard: null,
+  preview: null,
 
   // 换工作区后旧的索引进度不再适用。
   setWorkspace: (workspace, tree) => set((state) => ({ workspace, tree, indexProgress: workspace === state.workspace ? state.indexProgress : null })),
@@ -170,6 +196,8 @@ export const useAppStore = create<AppState>((set) => ({
     set((state) => ({ indexProgress, indexVersion: refresh ? state.indexVersion + 1 : state.indexVersion })),
   setApiKey: (apiKey) => set({ apiKey }),
   setStatus: (status) => set({ status }),
+  setFileClipboard: (fileClipboard) => set({ fileClipboard }),
+  setPreview: (preview) => set({ preview }),
 }));
 
 /** 工作区内全部 Markdown 文件的绝对路径，供 [[ 提及与命令模板解析笔记。 */

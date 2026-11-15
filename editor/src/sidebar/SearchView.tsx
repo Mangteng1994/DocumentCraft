@@ -1,7 +1,8 @@
 /**
  * 工作区搜索：Ctrl+F 在侧栏标签栏下方打开搜索框（SearchBar），搜索框左侧的范围按钮切换三种模式：
  * 所有（文件名 + 正文）、所有文件名、所有正文。有关键词时结果列表（SearchResults）替换目录树，
- * 按文件分组。Markdown 结果在编辑器中打开并选中命中文字，其他文件交给系统默认应用。
+ * 按文件分组。左键点击文件或某处匹配，在中间文档区弹出预览页，显示识别到的文件名、标题或正文内容（DC-066）；
+ * 双击文件则直接打开：Markdown 在编辑器中打开，其他文件交给系统默认应用。
  * 搜索由 Rust 端 `search_workspace` 完成；Word、Excel、PowerPoint、PDF 的正文来自后台建立的索引，
  * 首次打开搜索时开始建立，进度显示在结果上方。
  */
@@ -9,7 +10,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Check, ChevronDown, File, FileText, Search, X } from "lucide-react";
 import { errorText, searchWorkspace, type SearchFile, type SearchResult } from "../backend";
-import { openDocument, openSearchResult, openWithSystem } from "../documentActions";
+import { openDocument, openWithSystem, showSearchPreview } from "../documentActions";
 import { parentDirectory, relativePath } from "../paths";
 import { SEARCH_MODES, type SearchMode } from "../settings/schema";
 import { useSettings } from "../settings/settingsStore";
@@ -177,19 +178,22 @@ export function SearchBar() {
   );
 }
 
-function SearchFileGroup({ file, root, query }: { file: SearchFile; root: string; query: string }) {
+function SearchFileGroup({ file, root, query, mode }: { file: SearchFile; root: string; query: string; mode: SearchMode }) {
   const folder = relativePath(root, parentDirectory(file.path));
   const isMarkdown = MARKDOWN_NAME.test(file.name);
-  const openMatch = (occurrence: number) => {
-    if (isMarkdown) {
-      void openSearchResult(file.path, query, occurrence);
-      return;
-    }
-    void openWithSystem(file.path, file.name);
+  /** 弹出预览页；focusLocator 为被点击匹配的位置说明，预览页据此滚动到对应命中。 */
+  const preview = (focusLocator: string) => {
+    showSearchPreview({ path: file.path, name: file.name, query, mode, focusLocator });
   };
   return (
     <li className="dc-search-file">
-      <button type="button" className="dc-search-file-row" title={file.path} onClick={() => openFile(file)}>
+      <button
+        type="button"
+        className="dc-search-file-row"
+        title={`${file.path}\n单击预览，双击打开`}
+        onClick={() => preview("")}
+        onDoubleClick={() => openFile(file)}
+      >
         {isMarkdown ? (
           <FileText size={iconSize.sm} strokeWidth={iconStroke.regular} />
         ) : (
@@ -203,7 +207,7 @@ function SearchFileGroup({ file, root, query }: { file: SearchFile; root: string
         <ul className="dc-search-matches">
           {file.matches.map((match) => (
             <li key={match.occurrence}>
-              <button type="button" className="dc-search-match" onClick={() => openMatch(match.occurrence)}>
+              <button type="button" className="dc-search-match" onClick={() => preview(match.locator)}>
                 <span className="dc-search-line">{match.locator}</span>
                 <span className="dc-search-snippet">
                   {match.before}
@@ -374,7 +378,7 @@ export function SearchResults() {
       {result && fileCount > 0 && (
         <ul className="dc-search-results" aria-label="搜索结果">
           {result.files.map((file) => (
-            <SearchFileGroup key={file.path} file={file} root={workspace} query={trimmed} />
+            <SearchFileGroup key={file.path} file={file} root={workspace} query={trimmed} mode={mode} />
           ))}
         </ul>
       )}

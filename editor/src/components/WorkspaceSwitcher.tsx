@@ -4,8 +4,8 @@
  */
 
 import { useEffect, useRef, useState } from "react";
-import { Check, Folder, FolderOpen } from "lucide-react";
-import { chooseWorkspace, openWorkspace } from "../documentActions";
+import { Check, Folder, FolderOpen, X } from "lucide-react";
+import { chooseWorkspace, forgetWorkspace, openWorkspace } from "../documentActions";
 import { fileName, parentDirectory } from "../paths";
 import { useSettings } from "../settings/settingsStore";
 import { useAppStore } from "../store";
@@ -77,18 +77,29 @@ export function WorkspaceSwitcher() {
           {recent.map((root) => {
             const current = samePath(workspace, root);
             return (
-              <button
-                key={root}
-                type="button"
-                role="menuitem"
-                className={`dc-workspace-item${current ? " is-current" : ""}`}
-                title={root}
-                onClick={() => choose(root)}
-              >
-                <span className="dc-workspace-check">{current && <Check size={iconSize.sm} />}</span>
-                <span className="dc-workspace-item-name">{fileName(root) || root}</span>
-                <span className="dc-workspace-item-path">{parentDirectory(root)}</span>
-              </button>
+              <div key={root} className="dc-workspace-row">
+                <button
+                  type="button"
+                  role="menuitem"
+                  className={`dc-workspace-item${current ? " is-current" : ""}`}
+                  title={root}
+                  onClick={() => choose(root)}
+                >
+                  <span className="dc-workspace-check">{current && <Check size={iconSize.sm} />}</span>
+                  <span className="dc-workspace-item-name">{fileName(root) || root}</span>
+                  <span className="dc-workspace-item-path">{parentDirectory(root)}</span>
+                </button>
+                {/* 只把文件夹从最近列表移除，不删除磁盘上的文件夹，也不关闭已打开的工作区。 */}
+                <button
+                  type="button"
+                  className="dc-icon-button dc-workspace-remove"
+                  aria-label={`从最近列表移除 ${root}`}
+                  title="从最近列表移除（不会删除文件夹）"
+                  onClick={() => forgetWorkspace(root)}
+                >
+                  <X size={iconSize.sm} />
+                </button>
+              </div>
             );
           })}
           <button type="button" role="menuitem" className="dc-workspace-item is-action" onClick={chooseOther}>

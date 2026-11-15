@@ -19,7 +19,7 @@ import { anchorFromSelection } from "./annotations";
 import { currentSelection, isInTable, runTableAction, type TableAction } from "./editorCommands";
 import { getEditor, insertMarkdown } from "./editorHandle";
 
-interface MenuItem {
+export interface MenuItem {
   label: string;
   hotkey?: ActionId;
   disabled?: boolean;
@@ -27,7 +27,7 @@ interface MenuItem {
   submenu?: MenuEntry[];
 }
 
-type MenuEntry = MenuItem | "separator";
+export type MenuEntry = MenuItem | "separator";
 
 const TABLE_ITEMS: { label: string; action: TableAction }[] = [
   { label: "在上方插入行", action: "addRowBefore" },
@@ -39,7 +39,7 @@ const TABLE_ITEMS: { label: string; action: TableAction }[] = [
   { label: "删除表格", action: "deleteTable" },
 ];
 
-function MenuList({ entries, onDone }: { entries: MenuEntry[]; onDone: () => void }) {
+export function MenuList({ entries, onDone }: { entries: MenuEntry[]; onDone: () => void }) {
   const hotkeys = useSettings((state) => state.settings.hotkeys);
   const [openIndex, setOpenIndex] = useState<number | null>(null);
   return (

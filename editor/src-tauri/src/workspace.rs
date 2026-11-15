@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant, UNIX_EPOCH};
 
-use crate::extract::{is_text_file, MAX_TEXT_FILE_BYTES, PAGE_BREAK};
+use crate::extract::{decode_text_bytes, is_text_file, MAX_TEXT_FILE_BYTES, PAGE_BREAK};
 use crate::textindex::{fold_text, indexable, DocEntry, FileRec, IndexProgress, ScanResult, SearchIndex};
 
 /// 单个目录最多列出的条目数，防止误选磁盘根目录时界面卡死。
@@ -605,7 +605,7 @@ fn walk_directory(
     }
 }
 
-/// 读取纯文本文件的内容。过大或不是 UTF-8 时返回 None，此时该文件只能按文件名匹配。
+/// 读取纯文本文件的内容，自动识别 UTF-8、GBK 等编码。过大或编码无法识别时返回 None，此时该文件只能按文件名匹配。
 fn read_searchable_text(path: &Path) -> Option<String> {
     if !is_text_file(path) {
         return None;
@@ -615,7 +615,7 @@ fn read_searchable_text(path: &Path) -> Option<String> {
         return None;
     }
     let bytes = fs::read(path).ok()?;
-    String::from_utf8(bytes).ok()
+    decode_text_bytes(&bytes)
 }
 
 fn floor_boundary(text: &str, mut index: usize) -> usize {

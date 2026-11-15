@@ -19,6 +19,8 @@ import { QuickAsk } from "./features/copilot/QuickAsk";
 import { useCopilot } from "./features/copilot/copilotStore";
 import { toggleCopilot } from "./features/copilot/actions";
 import { SettingsModal } from "./features/settings/SettingsModal";
+import { SearchPreview } from "./features/preview/SearchPreview";
+import { FileProperties } from "./sidebar/FileProperties";
 import { DocumentTabs } from "./components/DocumentTabs";
 import { PaneResizer, paneWidthStyle } from "./components/PaneResizer";
 import { RecentWorkspaces } from "./components/RecentWorkspaces";
@@ -67,6 +69,9 @@ function ActiveOverlay({ overlay }: { overlay: Overlay }) {
   if (overlay.kind === "settings") {
     return <SettingsModal tab={overlay.tab} />;
   }
+  if (overlay.kind === "properties") {
+    return <FileProperties path={overlay.path} />;
+  }
   if (overlay.kind === "insertTable") {
     return <InsertTablePicker />;
   }
@@ -80,6 +85,7 @@ export function App() {
   const rightPanel = useAppStore((state) => state.rightPanel);
   const setRightPanel = useAppStore((state) => state.setRightPanel);
   const overlay = useAppStore((state) => state.overlay);
+  const preview = useAppStore((state) => state.preview);
   const openSettings = useAppStore((state) => state.openSettings);
   const status = useAppStore((state) => state.status);
   const notes = useAppStore((state) => state.notes);
@@ -162,6 +168,8 @@ export function App() {
             <MarkdownEditor />
           </div>
           {!hasDocument && <WelcomeView />}
+          {/* 搜索结果预览页盖在文档区上，编辑器保持挂载，关闭后原样恢复。 */}
+          {preview && <SearchPreview />}
         </main>
         {rightPanel && (
           <aside className="dc-panel" aria-label={rightPanel === "comments" ? "批注" : "Copilot"}>

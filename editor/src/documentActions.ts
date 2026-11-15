@@ -3,7 +3,21 @@
  */
 
 import { ask, open } from "@tauri-apps/plugin-dialog";
-import { createFolder, createMarkdown, docflow, errorText, listDir, listTree, openPath, readText, writeText } from "./backend";
+import { writeText as writeClipboard } from "@tauri-apps/plugin-clipboard-manager";
+import {
+  copyEntry,
+  createFolder,
+  createMarkdown,
+  docflow,
+  errorText,
+  listDir,
+  listTree,
+  moveEntry,
+  openPath,
+  readText,
+  trashEntry,
+  writeText,
+} from "./backend";
 import { setDocumentDirectory } from "./editor/assets";
 import {
   currentMarkdown,
@@ -19,7 +33,7 @@ import { setAnnotationMeta, type Note, type NoteAnchor } from "./editor/annotati
 import { fileName, parentDirectory } from "./paths";
 import { MAX_RECENT_WORKSPACES } from "./settings/schema";
 import { useSettings } from "./settings/settingsStore";
-import { useAppStore } from "./store";
+import { useAppStore, type SearchPreviewTarget } from "./store";
 
 /** 关闭有未保存修改的页签前询问是否保存，返回 false 表示保存失败、操作中止。 */
 async function confirmLeave(): Promise<boolean> {
@@ -195,6 +209,8 @@ async function activate(path: string, dirty: boolean): Promise<void> {
   store.setDirty(dirty);
   store.setActiveNoteId(null);
   store.setStatus("");
+  // 搜索结果预览页盖在编辑区上，切换或打开文档后必须收起，否则看不到文档。
+  store.setPreview(null);
   await loadNotes();
 }
 
@@ -381,4 +397,116 @@ export function selectNote(id: string | null): void {
   const store = useAppStore.getState();
   store.setActiveNoteId(id);
   pushNotesToEditor(store.notes, id);
+}
+
+// ---------------------------------------------------------------------------
+// 文件树右键菜单（DC-064）与搜索结果预览（DC-066）
+// ---------------------------------------------------------------------------
+
+/** path 是否等于 folder，或位于 folder 之内（不区分大小写，兼容两种分隔符）。 */
+function isInside(path: string, folder: string): boolean {
+  const lower = path.toLowerCase();
+  const base = folder.toLowerCase().replace(/[\\/]+$/, "");
+  return lower === base || lower.startsWith(`${base}\\`) || lower.startsWith(`${base}/`);
+}
+
+/** 当前打开的页签中，位于 path（文件或文件夹）之内的文档路径。 */
+function openTabsInside(path: string): string[] {
+  return useAppStore
+    .getState()
+    .tabs.map((tab) => tab.path)
+    .filter((tabPath) => isInside(tabPath, path));
+}
+
+/** 把文件树中的条目记入应用内的复制或剪切状态，粘贴时再执行。 */
+export function copyEntryToClipboard(path: string, mode: "copy" | "cut"): void {
+  const store = useAppStore.getState();
+  store.setFileClipboard({ path, mode });
+  store.setStatus(`${mode === "copy" ? "已复制" : "已剪切"}「${fileName(path)}」，在目标文件夹上右键选择粘贴`);
+}
+
+/** 把剪贴板中的条目粘贴到 targetDir。复制保留剪贴板，可重复粘贴；剪切成功后清空。重名自动改名，不覆盖。 */
+export async function pasteEntry(targetDir: string): Promise<void> {
+  const store = useAppStore.getState();
+  const clipboard = store.fileClipboard;
+  if (!clipboard) {
+    store.setStatus("没有可粘贴的内容，请先复制或剪切文件。");
+    return;
+  }
+  const name = fileName(clipboard.path);
+  try {
+    if (clipboard.mode === "cut") {
+      // 页签里正在编辑的文件移动后，页签仍指向旧路径，会误保存回旧位置，所以要求先关闭。
+      if (openTabsInside(clipboard.path).length > 0) {
+        store.setStatus(`「${name}」已在页签中打开，请先关闭再移动。`);
+        return;
+      }
+      await moveEntry(clipboard.path, targetDir);
+      store.setFileClipboard(null);
+      store.setStatus(`已移动「${name}」`);
+    } else {
+      await copyEntry(clipboard.path, targetDir);
+      store.setStatus(`已粘贴「${name}」`);
+    }
+    await refreshTree();
+  } catch (error) {
+    store.setStatus(errorText(error));
+  }
+}
+
+/** 删除文件或文件夹：确认后移入回收站，可在回收站还原。已打开的页签先关闭，有未保存修改时询问。 */
+export async function deleteEntry(path: string, isDir: boolean): Promise<void> {
+  const store = useAppStore.getState();
+  const name = fileName(path);
+  const message = isDir ? `将文件夹「${name}」及其中的全部内容移到回收站吗？` : `将「${name}」移到回收站吗？`;
+  const confirmed = await ask(message, { title: "DocumentCraft", kind: "warning", okLabel: "移到回收站", cancelLabel: "取消" });
+  if (!confirmed) {
+    return;
+  }
+  for (const tabPath of openTabsInside(path)) {
+    const closed = await closeTab(tabPath);
+    if (!closed) {
+      return;
+    }
+  }
+  try {
+    await trashEntry(path);
+    const clipboard = useAppStore.getState().fileClipboard;
+    if (clipboard && isInside(clipboard.path, path)) {
+      store.setFileClipboard(null);
+    }
+    const preview = useAppStore.getState().preview;
+    if (preview && isInside(preview.path, path)) {
+      store.setPreview(null);
+    }
+    store.setStatus(`已将「${name}」移到回收站`);
+    await refreshTree();
+  } catch (error) {
+    store.setStatus(errorText(error));
+  }
+}
+
+/** 把完整路径写入系统剪贴板。 */
+export async function copyPathText(path: string): Promise<void> {
+  const store = useAppStore.getState();
+  try {
+    await writeClipboard(path);
+    store.setStatus("已复制完整文件地址");
+  } catch (error) {
+    store.setStatus(`无法写入剪贴板：${errorText(error)}`);
+  }
+}
+
+/** 打开属性窗口。 */
+export function showProperties(path: string): void {
+  useAppStore.getState().setOverlay({ kind: "properties", path });
+}
+
+/** 在中间文档区打开搜索结果预览页。 */
+export function showSearchPreview(target: SearchPreviewTarget): void {
+  useAppStore.getState().setPreview(target);
+}
+
+export function closeSearchPreview(): void {
+  useAppStore.getState().setPreview(null);
 }
