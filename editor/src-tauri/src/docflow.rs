@@ -221,6 +221,13 @@ pub fn docflow_cancel(jobs: tauri::State<'_, Jobs>, job: String) -> Result<(), S
     Ok(())
 }
 
+/// 返回进行中的 docflow 任务数。安装更新会替换 sidecar，任务未结束时前端据此拒绝安装。
+#[tauri::command]
+pub fn docflow_active(jobs: tauri::State<'_, Jobs>) -> Result<usize, String> {
+    let table = jobs.0.lock().map_err(|_| "任务表不可用。".to_string())?;
+    Ok(table.len())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

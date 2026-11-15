@@ -76,7 +76,18 @@ export interface Settings {
     /** 最近打开的工作区文件夹，最新的在前，最多 MAX_RECENT_WORKSPACES 个。 */
     recentWorkspaces: string[];
   };
+  update: {
+    /** 启动时与之后每 UPDATE_CHECK_INTERVAL_MS 向 GitHub Release 检查一次新版本。 */
+    autoCheck: boolean;
+    /** 发现新版本后在后台自动下载；安装始终由用户确认。 */
+    autoDownload: boolean;
+    /** 上一次检查的时间（毫秒时间戳，成功与失败都记录），0 表示从未检查。 */
+    lastCheckedAt: number;
+  };
 }
+
+/** 自动检查更新的间隔：6 小时。 */
+export const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
 
 /** 搜索范围：所有（文件名 + 纯文本正文）、所有文件名、所有纯文本正文。值与 Rust 端 search_workspace 的 mode 一致。 */
 export const SEARCH_MODES = ["all", "names", "text"] as const;
@@ -105,6 +116,7 @@ export const DEFAULT_SETTINGS: Settings = {
   figure: { style: "colored", plannerModel: "", figureModel: "", reviewModel: "", visualReview: false },
   layout: { sidebarWidth: 0, panelWidth: 0 },
   history: { recentWorkspaces: [] },
+  update: { autoCheck: true, autoDownload: true, lastCheckedAt: 0 },
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -167,5 +179,6 @@ export function normalizeSettings(saved: unknown): Settings {
     figure: mergeSection(DEFAULT_SETTINGS.figure, root.figure),
     layout: mergeSection(DEFAULT_SETTINGS.layout, root.layout),
     history: { recentWorkspaces: normalizeRecentWorkspaces(root.history) },
+    update: mergeSection(DEFAULT_SETTINGS.update, root.update),
   };
 }

@@ -1,7 +1,8 @@
 //! DocumentCraft 阅读编辑器的 Tauri 后端。
 //!
 //! 只提供编辑器需要的少量命令：工作区目录树、Markdown 读写、编辑器设置、调用 `docflow`
-//! sidecar 和用系统程序打开导出结果。VMark 原有的终端、MCP、多窗口、自动更新等后端模块不移植。
+//! sidecar 和用系统程序打开导出结果。VMark 原有的终端、MCP、多窗口等后端模块不移植；
+//! 自动更新改用官方 `tauri-plugin-updater` 直接检查本项目的 GitHub Release（DC-063），不沿用 VMark 的实现。
 
 mod docflow;
 mod extract;
@@ -93,9 +94,13 @@ pub fn run() {
             docflow::docflow_run,
             docflow::docflow_stream,
             docflow::docflow_cancel,
+            docflow::docflow_active,
             open_path,
             builtin_template,
         ]);
+    // 更新插件的端点与公钥来自 tauri.conf.json 的 plugins.updater；安装包签名校验失败时插件会拒绝安装。
+    #[cfg(desktop)]
+    let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
     builder
         .run(tauri::generate_context!())
         .expect("DocumentCraft 启动失败");

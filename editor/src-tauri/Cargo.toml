@@ -22,3 +22,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 pdf-extract = "0.12.1"
+
+# 自动更新插件只用于桌面端，签名校验、下载与 NSIS 安装由插件完成（DC-063）。
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+tauri-plugin-updater = "2"

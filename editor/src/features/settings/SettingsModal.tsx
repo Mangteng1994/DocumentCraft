@@ -15,6 +15,7 @@ import { CopilotSettings } from "./CopilotSettings";
 import { FilesSettings } from "./FilesSettings";
 import { FigureSettings } from "./FigureSettings";
 import { HotkeySettings } from "./HotkeySettings";
+import { UpdateSettings } from "../updater/UpdateSettings";
 import { WordExportSettings } from "./WordExportSettings";
 
 const GROUPS: { title: string; tabs: { id: SettingsTab; label: string }[] }[] = [
@@ -24,6 +25,7 @@ const GROUPS: { title: string; tabs: { id: SettingsTab; label: string }[] }[] = 
       { id: "appearance", label: "外观" },
       { id: "files", label: "文件" },
       { id: "hotkeys", label: "快捷键" },
+      { id: "update", label: "关于与更新" },
     ],
   },
   {
@@ -50,6 +52,7 @@ const TAB_CONTENT: Record<SettingsTab, () => ReactNode> = {
   ai: () => <AIConnectionSettings />,
   word: () => <WordExportSettings />,
   figure: () => <FigureSettings />,
+  update: () => <UpdateSettings />,
 };
 
 export function SettingsModal({ tab }: { tab: SettingsTab }) {

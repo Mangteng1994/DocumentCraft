@@ -83,6 +83,28 @@ npm run bundle
 
 sidecar 输出到 `out/sidecar/`。`npm run bundle` 调用 `scripts/bundle-editor.ps1`，固定用 rustup 的 MSVC 工具链（`stable-x86_64-pc-windows-msvc`，需 Visual Studio Build Tools 的 C++ 工具）编译：WebView2 加载器静态链接，不需要额外 DLL；gnullvm 构建会被部分杀毒软件（如火绒）误报隔离。安装包位于 `editor/src-tauri/target/release/bundle/nsis/`。目标机器需要 WebView2 Runtime，Windows 11 已自带。
 
+### 自动更新与发布
+
+编辑器启动时和之后每 6 小时（可在「设置 → 关于与更新」关闭）检查本仓库 GitHub 上最新的正式 Release，发现新版本后自动下载，下载完成在状态栏提示，由用户点击「重启并安装」。安装包由官方 updater 插件用 minisign 公钥校验签名，校验不过不安装。检查地址为 `https://github.com/Mangteng1994/DocumentCraft/releases/latest/download/latest.json`，仓库需公开，预发布版本不会被拉取。
+
+首次使用需要一对更新签名密钥，私钥只放在打包机上，丢失后已安装的版本无法再自动更新：
+
+```powershell
+cd editor
+npx tauri signer generate -w $env:USERPROFILE\.tauri\documentcraft.key
+```
+
+把输出的公钥填入 `editor/src-tauri/tauri.conf.json` 的 `plugins.updater.pubkey`。`npm run bundle` 会读取 `%USERPROFILE%\.tauri\documentcraft.key`（或环境变量 `TAURI_SIGNING_PRIVATE_KEY(_PATH)`）；私钥设了密码时再设置 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`。
+
+发布一个新版本：同步修改 `tauri.conf.json`、`Cargo.toml`、`package.json` 三处版本号，执行 `npm run bundle`，再运行发布脚本。脚本先生成 `out/release/latest.json`，确认后用 `gh` 创建 Release `vX.Y.Z` 并上传安装包与 `latest.json`：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\publish-release.ps1 -Notes "更新说明" -DryRun
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\publish-release.ps1 -Notes "更新说明"
+```
+
+开发模式（`tauri dev`）不自动检查，只能在设置页手动检查。
+
 ### sidecar 接口
 
 编辑器调用的子命令都向标准输出写 JSON，失败时为 `{"status": "error", "message": ...}` 并返回非零退出码。批注正文、对话内容和设置经标准输入传 JSON。

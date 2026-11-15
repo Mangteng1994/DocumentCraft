@@ -243,6 +243,28 @@ textarea {
   flex-shrink: 0;
 }
 
+/* 状态栏更新提示（DC-063）：只在有新版本时出现，用强调色与普通状态文字区分 */
+.dc-statusbar-update {
+  flex-shrink: 0;
+  padding: 0 var(--dc-space-md);
+  border: none;
+  border-radius: var(--dc-radius-md);
+  background: transparent;
+  color: var(--dc-color-accent-text);
+  font-size: inherit;
+  cursor: pointer;
+}
+
+.dc-statusbar-update:hover {
+  background: var(--dc-color-surface-hover);
+}
+
+.dc-update-notes {
+  display: block;
+  margin-top: var(--dc-space-sm);
+  white-space: pre-wrap;
+}
+
 /* 状态栏工作区切换（DC-056） */
 .dc-workspace-switcher {
   position: relative;

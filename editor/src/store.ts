@@ -10,7 +10,7 @@ import type { HeadingItem } from "@vmark/utils/markdownOutline";
 
 export type SidebarView = "files" | "outline";
 export type RightPanel = "comments" | "copilot" | null;
-export type SettingsTab = "appearance" | "files" | "hotkeys" | "copilot" | "ai" | "word" | "figure";
+export type SettingsTab = "appearance" | "files" | "hotkeys" | "copilot" | "ai" | "word" | "figure" | "update";
 
 /** 浮层：设置、插入表格、Quick Ask。同一时刻只显示一个。 */
 export type Overlay =
