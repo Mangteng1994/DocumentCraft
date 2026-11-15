@@ -68,7 +68,7 @@
 | ID | 功能 | 验收条件 | 状态 |
 | --- | --- | --- | --- |
 | DC-062 | 科研配图分阶段模型与视觉复核 | 规划、单图和视觉复核可使用同一连接下的不同模型；视觉复核默认关闭，开启后最多两轮，修订失败可保留原预览 | 已实现 · `figure_workflow.py`、`ai.py`、`siwc.py`、`editor/src/features/figures/workflow.tsx`、`FigureSettings.tsx`；模拟接口核对了视觉复核的图片和取证载荷，真实模型未测试 |
-| DC-063 | 自动检查与更新 | 启动时与之后每 6 小时检查本仓库 GitHub 最新正式 Release（预发布不拉取），间隔以上次检查时间计算，重启不重复请求；发现新版本后默认自动下载，状态栏右侧提示，由用户点击「重启并安装」，不自动关闭程序；「设置 → 关于与更新」显示当前版本、上次检查时间，可手动检查，可分别关闭自动检查与自动下载，显示新版本说明与下载进度；安装包经 minisign 签名校验；有未保存页签时先询问，有 docflow 任务时拒绝安装；网络失败只在设置页显示，下个周期重试；开发模式不自动检查 | 已实现（待签名密钥与公开仓库）· `editor/src/features/updater/`、`settings/schema.ts` 的 `update`、`src-tauri/src/docflow.rs` 的 `docflow_active`、`tauri.conf.json` 的 `plugins.updater`、`scripts/publish-release.ps1`；前端 `tsc --noEmit` 通过；未测试：本环境无 Rust 与 Windows 工具链，未编译 Rust、未运行界面、未实际检查与安装；`Cargo.lock` 需在下次编译时更新 |
+| DC-063 | 自动检查与更新 | 启动时与之后每 6 小时检查本仓库 GitHub 最新正式 Release（预发布不拉取），间隔以上次检查时间计算，重启不重复请求；发现新版本后默认自动下载，状态栏右侧提示，由用户点击「重启并安装」，不自动关闭程序；「设置 → 关于与更新」显示当前版本、上次检查时间，可手动检查，可分别关闭自动检查与自动下载，显示新版本说明与下载进度；安装包经 minisign 签名校验；有未保存页签时先询问，有 docflow 任务时拒绝安装；网络失败只在设置页显示，下个周期重试；开发模式不自动检查 | 已实现并已发布 0.3.0（待 0.3.1 验证完整更新流程）· `editor/src/features/updater/`、`settings/schema.ts` 的 `update`、`src-tauri/src/docflow.rs` 的 `docflow_active`、`tauri.conf.json` 的 `plugins.updater`、`scripts/publish-release.ps1`、`scripts/build-release.ps1`；已核对：仓库已公开；MSVC 工具链编译通过并生成签名安装包；`v0.3.0` Release 已发布，匿名访问 `releases/latest/download/latest.json` 返回 200 且内容与本地一致，签名密钥 ID 与配置的公钥一致（4A7445FF4D67F92A）。未验证：在已安装的 0.3.0 上检查、下载并安装更新的完整流程（需要发布更高版本 0.3.1 后实测）；0.2.9 及更早的安装没有更新功能，必须手动安装一次 |
 
 | ID | 功能 | 验收条件 | 状态与实现 |
 | --- | --- | --- | --- |
