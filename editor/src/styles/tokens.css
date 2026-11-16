@@ -120,6 +120,7 @@
   --dc-size-popover-max-height: 420px;
   --dc-size-table-cell: 18px;
   --dc-size-hotkey: 140px;
+  --dc-size-hex-input: 96px;                 /* 五彩文档大纲配置中 HEX 输入框的宽度 */
   --dc-size-props-label: 88px;               /* 属性窗口左侧名称列的宽度 */
   --dc-size-preview-count: 48px;             /* 预览页「3 / 12」命中计数的最小宽度 */
   --dc-size-scrollbar: 10px;

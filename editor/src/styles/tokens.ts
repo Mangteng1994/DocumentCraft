@@ -23,6 +23,17 @@ export const paneWidth = {
 } as const;
 
 /**
+ * 五彩文档大纲（DC-067）的默认配色：莫兰迪色系，降低饱和度、带灰调，在浅色与深色主题下都清晰可读。
+ * 这些值写入设置作为默认规则，用户可在「设置 → 文件 → 五彩文档大纲」中改成任意 HEX。
+ */
+export const fileTypeColorDefaults = {
+  word: "#7B93AC",
+  excel: "#87A28A",
+  pdf: "#B97C7C",
+  powerpoint: "#C89A73",
+} as const;
+
+/**
  * 科研配图令牌。
  *
  * 配图会插入 Word、WPS 并打印，固定白底，不跟随界面主题。尺寸以印刷点（pt）为单位，

@@ -5,11 +5,19 @@
  * 旧版本缺少的字段自动补齐。AI 连接设置由 docflow 单独保存，不在这里。
  */
 
+import { fileTypeColorDefaults } from "../styles/tokens";
+
 export type ThemeMode = "system" | "light" | "dark";
 export type TemplateMode = "auto" | "style" | "full";
 export type FigureStyle = "mono" | "colored";
 export type SendShortcut = "enter" | "shift-enter";
 export type CopilotMode = "chat" | "vault";
+
+/** 五彩文档大纲的一条着色规则：扩展名（小写、带点，如 ".docx"）与 HEX 颜色（#RRGGBB）。 */
+export interface FileColorRule {
+  extensions: string[];
+  color: string;
+}
 
 /** 可绑定快捷键的操作。scope 为 editor 的操作只在编辑区获得焦点时生效。 */
 export const ACTIONS = [
@@ -46,6 +54,11 @@ export interface Settings {
     searchMode: SearchMode;
   };
   hotkeys: Hotkeys;
+  /** 五彩文档大纲（DC-067）：开启后目录树按扩展名给文件的图标和名称着色。 */
+  colorfulOutline: {
+    enabled: boolean;
+    rules: FileColorRule[];
+  };
   copilot: {
     /** 工作区内的 Copilot 文件夹，对话记录和命令分别存于其下的 copilot-conversations/、copilot-custom-prompts/。 */
     folder: string;
@@ -95,6 +108,39 @@ export type SearchMode = (typeof SEARCH_MODES)[number];
 
 export const MAX_RECENT_WORKSPACES = 10;
 
+/** HEX 颜色只接受 #RRGGBB，便于 input[type=color] 直接使用。 */
+export const HEX_COLOR = /^#[0-9a-fA-F]{6}$/;
+
+/** 五彩文档大纲的默认规则，颜色取自设计令牌中的莫兰迪色。 */
+export function defaultFileColorRules(): FileColorRule[] {
+  return [
+    { extensions: [".docx"], color: fileTypeColorDefaults.word },
+    { extensions: [".xlsx"], color: fileTypeColorDefaults.excel },
+    { extensions: [".pdf"], color: fileTypeColorDefaults.pdf },
+    { extensions: [".pptx", ".ppt"], color: fileTypeColorDefaults.powerpoint },
+  ];
+}
+
+/**
+ * 把用户输入的扩展名文本拆成规则使用的列表。
+ *
+ * 支持中英文逗号、分号和空白分隔，自动补上前导点并转小写，去掉重复项。
+ */
+export function parseExtensions(text: string): string[] {
+  const result: string[] = [];
+  for (const part of text.split(/[,，;；\s]+/)) {
+    const trimmed = part.trim().toLowerCase();
+    if (!trimmed || trimmed === ".") {
+      continue;
+    }
+    const extension = trimmed.startsWith(".") ? trimmed : `.${trimmed}`;
+    if (!result.includes(extension)) {
+      result.push(extension);
+    }
+  }
+  return result;
+}
+
 function defaultHotkeys(): Hotkeys {
   const entries = ACTIONS.map((action) => [action.id, action.defaultKey]);
   return Object.fromEntries(entries) as Hotkeys;
@@ -104,6 +150,7 @@ export const DEFAULT_SETTINGS: Settings = {
   appearance: { theme: "system" },
   files: { showAllFiles: false, searchMode: "all" },
   hotkeys: defaultHotkeys(),
+  colorfulOutline: { enabled: false, rules: defaultFileColorRules() },
   copilot: {
     folder: "copilot",
     autoAttachActiveNote: true,
@@ -156,6 +203,35 @@ function normalizeRecentWorkspaces(saved: unknown): string[] {
   return result.slice(0, MAX_RECENT_WORKSPACES);
 }
 
+/**
+ * 读取保存的五彩文档大纲设置。
+ *
+ * 规则列表不能用 mergeSection 按类型合并（数组的 typeof 也是 object），这里逐条校验：
+ * 颜色不是 #RRGGBB 或扩展名为空的规则丢弃。从未保存过规则时使用默认规则；
+ * 用户主动删光规则时保存的是空数组，保持为空。
+ */
+function normalizeColorfulOutline(saved: unknown): Settings["colorfulOutline"] {
+  if (!isRecord(saved)) {
+    return { enabled: false, rules: defaultFileColorRules() };
+  }
+  const enabled = typeof saved.enabled === "boolean" ? saved.enabled : false;
+  if (!Array.isArray(saved.rules)) {
+    return { enabled, rules: defaultFileColorRules() };
+  }
+  const rules: FileColorRule[] = [];
+  for (const item of saved.rules) {
+    if (!isRecord(item) || typeof item.color !== "string" || !HEX_COLOR.test(item.color) || !Array.isArray(item.extensions)) {
+      continue;
+    }
+    const extensionText = item.extensions.filter((value): value is string => typeof value === "string").join(",");
+    const extensions = parseExtensions(extensionText);
+    if (extensions.length > 0) {
+      rules.push({ extensions, color: item.color.toUpperCase() });
+    }
+  }
+  return { enabled, rules };
+}
+
 /** 0.2.4 的搜索默认快捷键。设置文件会整体保存快捷键，旧默认值需要迁移到 Ctrl+F。 */
 const LEGACY_SEARCH_HOTKEY = "Ctrl+Shift+F";
 
@@ -174,6 +250,7 @@ export function normalizeSettings(saved: unknown): Settings {
     appearance: mergeSection(DEFAULT_SETTINGS.appearance, root.appearance),
     files,
     hotkeys,
+    colorfulOutline: normalizeColorfulOutline(root.colorfulOutline),
     copilot: mergeSection(DEFAULT_SETTINGS.copilot, root.copilot),
     wordExport: mergeSection(DEFAULT_SETTINGS.wordExport, root.wordExport),
     figure: mergeSection(DEFAULT_SETTINGS.figure, root.figure),
