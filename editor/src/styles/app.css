@@ -859,6 +859,15 @@ textarea {
   user-select: text;
 }
 
+/* 对话气泡里块间距收紧一档，选择器需高于后面文档排版的 .dc-document p 等规则 */
+.dc-chat-markdown.dc-document :is(p, ul, ol, pre, table, blockquote, .dc-alert, .dc-block-image) {
+  margin-bottom: var(--dc-space-md);
+}
+
+.dc-chat-markdown.dc-document li > :is(p, ul, ol) {
+  margin-bottom: 0;
+}
+
 .dc-chat-markdown > :first-child {
   margin-top: 0;
 }
@@ -1991,7 +2000,10 @@ textarea {
   gap: var(--dc-space-sm);
 }
 
-/* ---------- 文档排版（Obsidian 阅读视图风格） ---------- */
+/* ---------- 文档排版（DC-067，参照思源笔记轻量 Markdown 编辑器所用 Vditor 的 vditor-reset） ----------
+ * 规则：块元素只设下边距，统一为 --dc-space-block；标题上方多留一档；首个块顶格、最后一个块不留底边距。
+ * 标题与代码字号按正文字号的比例（em）计算。
+ */
 
 .dc-editor-scroll {
   height: 100%;
@@ -2001,16 +2013,27 @@ textarea {
 .dc-editor-host {
   max-width: var(--dc-size-document);
   margin: 0 auto;
-  padding: var(--dc-space-lg) var(--dc-space-2xl) var(--dc-space-3xl);
+  padding: var(--dc-space-2xl) var(--dc-space-2xl) var(--dc-space-3xl);
 }
 
 .dc-document {
   min-height: 100%;
   outline: none;
+  color: var(--dc-color-ink);
   font-family: var(--dc-font-document);
   font-size: var(--dc-font-size-body);
+  font-variant-ligatures: no-common-ligatures;
   line-height: var(--dc-line-height-body);
+  word-wrap: break-word;
   word-break: break-word;
+}
+
+.dc-document > :first-child {
+  margin-top: 0;
+}
+
+.dc-document > :last-child {
+  margin-bottom: 0;
 }
 
 .dc-document h1,
@@ -2019,33 +2042,33 @@ textarea {
 .dc-document h4,
 .dc-document h5,
 .dc-document h6 {
-  margin: var(--dc-space-2xl) 0 var(--dc-space-md);
-  font-weight: var(--dc-font-weight-heading);
-  line-height: var(--dc-line-height-tight);
+  margin: var(--dc-space-heading-top) 0 var(--dc-space-block);
+  font-weight: var(--dc-font-weight-bold);
+  line-height: var(--dc-line-height-heading);
 }
 
 .dc-document h1 {
-  font-size: var(--dc-font-size-h1);
+  font-size: var(--dc-font-scale-h1);
 }
 
 .dc-document h2 {
-  font-size: var(--dc-font-size-h2);
+  font-size: var(--dc-font-scale-h2);
 }
 
 .dc-document h3 {
-  font-size: var(--dc-font-size-h3);
+  font-size: var(--dc-font-scale-h3);
 }
 
 .dc-document h4 {
-  font-size: var(--dc-font-size-h4);
+  font-size: var(--dc-font-scale-h4);
 }
 
 .dc-document h5 {
-  font-size: var(--dc-font-size-h5);
+  font-size: var(--dc-font-scale-h5);
 }
 
 .dc-document h6 {
-  font-size: var(--dc-font-size-h6);
+  font-size: var(--dc-font-scale-h6);
   color: var(--dc-color-ink-muted);
 }
 
@@ -2065,6 +2088,8 @@ textarea {
   font-size: var(--dc-font-size-xs);
   font-weight: var(--dc-font-weight-regular);
   line-height: var(--dc-line-height-tight);
+  /* 绝对定位在标题左外侧时可用宽度为 0，不禁止换行会把「H1」折成两行 */
+  white-space: nowrap;
   pointer-events: none;
   user-select: none;
 }
@@ -2077,13 +2102,18 @@ textarea {
 .dc-editor-host .dc-document h6::before { content: "H6"; }
 
 .dc-document p {
-  margin: var(--dc-space-md) 0;
+  margin: 0 0 var(--dc-space-block);
 }
 
 .dc-document a,
 .dc-wiki-link,
 .dc-footnote-ref {
   color: var(--dc-color-accent-text);
+  text-decoration: none;
+}
+
+.dc-document a:hover {
+  text-decoration: underline;
 }
 
 .dc-document mark {
@@ -2091,36 +2121,96 @@ textarea {
   color: inherit;
 }
 
+/* 列表：缩进 2em，嵌套无序列表依次为实心圆、空心圆、方块；列表项之间留 0.25em */
+.dc-document ul,
+.dc-document ol {
+  margin: 0 0 var(--dc-space-block);
+  padding-left: var(--dc-indent-list);
+}
+
+.dc-document ul {
+  list-style-type: disc;
+}
+
+.dc-document ul ul {
+  list-style-type: circle;
+}
+
+.dc-document ul ul ul {
+  list-style-type: square;
+}
+
+.dc-document li + li {
+  margin-top: var(--dc-space-list-item);
+}
+
+/* TipTap 把列表项内容包在 <p> 里，去掉段落边距，避免紧凑列表被撑开 */
+.dc-document li > p {
+  margin: 0;
+}
+
+.dc-document li > p + p {
+  margin-top: var(--dc-space-list-item);
+}
+
+.dc-document li > ul,
+.dc-document li > ol {
+  margin: var(--dc-space-list-item) 0 0;
+}
+
+/* 引用：左侧圆角竖条，上下各缩进一点，不贴满整块高度 */
 .dc-document blockquote {
-  margin: var(--dc-space-lg) 0;
-  padding: 0 var(--dc-space-xl);
-  border-left: var(--dc-border-width-accent) solid var(--dc-color-accent);
+  position: relative;
+  margin: 0 0 var(--dc-space-block);
+  padding: 0 0 0 calc(var(--dc-border-width-quote) + var(--dc-space-quote-bar) * 2);
+  border: none;
   color: var(--dc-color-ink-muted);
+}
+
+.dc-document blockquote::before {
+  position: absolute;
+  top: var(--dc-space-quote-bar);
+  bottom: var(--dc-space-quote-bar);
+  left: var(--dc-space-2xs);
+  width: var(--dc-border-width-quote);
+  border-radius: var(--dc-radius-md);
+  background: var(--dc-color-quote-bar);
+  content: "";
+}
+
+.dc-document blockquote > p {
+  margin: var(--dc-space-2xs) 0;
+  padding: var(--dc-space-xs) 0;
 }
 
 .dc-document code,
 .dc-raw-inline {
-  padding: 0 var(--dc-space-xs);
+  padding: var(--dc-space-code-y) var(--dc-space-code-x);
   border-radius: var(--dc-radius-sm);
   background: var(--dc-color-code-surface);
   font-family: var(--dc-font-mono);
-  font-size: var(--dc-font-size-md);
+  font-size: var(--dc-font-scale-code);
+  word-break: break-word;
 }
 
 .dc-document pre {
   overflow-x: auto;
+  margin: 0 0 var(--dc-space-block);
   padding: var(--dc-space-lg) var(--dc-space-xl);
-  border: var(--dc-border);
   border-radius: var(--dc-radius-md);
   background: var(--dc-color-code-surface);
   font-family: var(--dc-font-mono);
-  font-size: var(--dc-font-size-md);
-  line-height: var(--dc-line-height-ui);
+  font-size: var(--dc-font-scale-code);
+  line-height: var(--dc-line-height-code);
 }
 
+/* pre 已按 85% 缩小，内层 code 不再重复缩小 */
 .dc-document pre code {
   padding: 0;
+  border-radius: 0;
   background: transparent;
+  font-size: inherit;
+  word-break: normal;
 }
 
 /* 需高于 TipTap 自带的 .ProseMirror [contenteditable="false"] { white-space: normal } */
@@ -2129,22 +2219,34 @@ textarea {
   white-space: pre-wrap;
 }
 
+/* 表格：按内容宽度排版，过宽时在表格内横向滚动；隔行浅底 */
 .dc-document table {
-  width: 100%;
-  margin: var(--dc-space-lg) 0;
+  display: block;
+  overflow-x: auto;
+  width: max-content;
+  max-width: 100%;
+  margin: 0 0 var(--dc-space-block);
   border-collapse: collapse;
+  border-spacing: 0;
+  empty-cells: show;
 }
 
 .dc-document th,
 .dc-document td {
-  padding: var(--dc-space-xs) var(--dc-space-md);
+  padding: var(--dc-space-cell-y) var(--dc-space-cell-x);
   border: var(--dc-border);
   vertical-align: top;
 }
 
 .dc-document th {
-  background: var(--dc-color-surface);
+  background: var(--dc-color-table-head);
   font-weight: var(--dc-font-weight-bold);
+  /* 浏览器默认表头居中；Markdown 未指定对齐的列应左对齐，指定对齐时由单元格的行内样式覆盖 */
+  text-align: start;
+}
+
+.dc-document tr:nth-child(2n) td {
+  background: var(--dc-color-table-stripe);
 }
 
 .dc-document th p,
@@ -2153,7 +2255,8 @@ textarea {
 }
 
 /* 表格选中单元格（TipTap 表格扩展的选择态） */
-.dc-document .selectedCell {
+.dc-document .selectedCell,
+.dc-document tr:nth-child(2n) td.selectedCell {
   background: var(--dc-color-accent-soft);
 }
 
@@ -2162,8 +2265,14 @@ textarea {
 }
 
 .dc-block-image {
-  margin: var(--dc-space-lg) 0;
+  margin: 0 0 var(--dc-space-block);
   text-align: center;
+}
+
+.dc-block-image figcaption {
+  margin-top: var(--dc-space-xs);
+  color: var(--dc-color-ink-muted);
+  font-size: var(--dc-font-scale-caption);
 }
 
 /* 找不到的图片（DC-053）：显示「找不到图片：文件名」占位，悬停显示原地址。 */
@@ -2179,9 +2288,11 @@ textarea {
 }
 
 .dc-document hr {
-  margin: var(--dc-space-2xl) 0;
+  height: var(--dc-border-width-rule);
+  margin: var(--dc-space-heading-top) 0;
+  padding: 0;
   border: none;
-  border-top: var(--dc-border);
+  background: var(--dc-color-rule);
 }
 
 /* 任务列表项：只读显示勾选状态，勾选内容随 Markdown 原样保存 */
@@ -2191,7 +2302,7 @@ textarea {
 
 .dc-document li[data-checked]::before {
   float: left;
-  margin-left: calc(-1 * var(--dc-space-xl));
+  margin-left: calc(-1 * var(--dc-space-xl) - var(--dc-space-2xs));
   color: var(--dc-color-accent);
   content: "☐";
 }
@@ -2200,13 +2311,19 @@ textarea {
   content: "☑";
 }
 
+.dc-document li[data-checked="true"] > p {
+  color: var(--dc-color-ink-faint);
+  text-decoration: line-through;
+}
+
 .dc-footnote-ref {
   font-size: var(--dc-font-size-sm);
 }
 
 .dc-footnote {
+  margin: 0 0 var(--dc-space-xs);
   color: var(--dc-color-ink-muted);
-  font-size: var(--dc-font-size-md);
+  font-size: var(--dc-font-scale-caption);
 }
 
 .dc-footnote::before {
@@ -2215,60 +2332,70 @@ textarea {
   margin-right: var(--dc-space-sm);
 }
 
-/* 提示块（Obsidian callout 配色） */
+/* 提示块：与引用同形的彩色圆角竖条，标题用该类型的颜色（Vditor callout 写法，Obsidian 配色） */
 .dc-alert {
-  margin: var(--dc-space-lg) 0;
-  padding: var(--dc-space-sm) var(--dc-space-xl);
-  border-left: var(--dc-border-width-accent) solid var(--dc-color-alert-note);
-  border-radius: var(--dc-radius-sm);
-  background: var(--dc-color-surface);
+  --dc-alert-color: var(--dc-color-alert-note);
+  position: relative;
+  margin: 0 0 var(--dc-space-block);
+  padding: 0 0 0 calc(var(--dc-border-width-quote) + var(--dc-space-quote-bar) * 2);
+  border: none;
+}
+
+.dc-alert::after {
+  position: absolute;
+  top: var(--dc-space-quote-bar);
+  bottom: var(--dc-space-quote-bar);
+  left: var(--dc-space-2xs);
+  width: var(--dc-border-width-quote);
+  border-radius: var(--dc-radius-md);
+  background: var(--dc-alert-color);
+  content: "";
 }
 
 .dc-alert::before {
   display: block;
-  color: var(--dc-color-alert-note);
-  font-size: var(--dc-font-size-sm);
-  font-weight: var(--dc-font-weight-bold);
+  padding: var(--dc-space-xs) 0 var(--dc-space-2xs);
+  color: var(--dc-alert-color);
+  font-size: var(--dc-font-scale-callout-title);
+  font-weight: var(--dc-font-weight-medium);
   content: attr(data-alert);
 }
 
-.dc-alert-tip {
-  border-left-color: var(--dc-color-alert-tip);
+.dc-alert > p {
+  margin: var(--dc-space-2xs) 0;
+  padding: var(--dc-space-xs) 0;
 }
 
-.dc-alert-tip::before {
-  color: var(--dc-color-alert-tip);
+.dc-alert-tip {
+  --dc-alert-color: var(--dc-color-alert-tip);
 }
 
 .dc-alert-important {
-  border-left-color: var(--dc-color-alert-important);
-}
-
-.dc-alert-important::before {
-  color: var(--dc-color-alert-important);
+  --dc-alert-color: var(--dc-color-alert-important);
 }
 
 .dc-alert-warning {
-  border-left-color: var(--dc-color-alert-warning);
-}
-
-.dc-alert-warning::before {
-  color: var(--dc-color-alert-warning);
+  --dc-alert-color: var(--dc-color-alert-warning);
 }
 
 .dc-alert-caution {
-  border-left-color: var(--dc-color-alert-caution);
-}
-
-.dc-alert-caution::before {
-  color: var(--dc-color-alert-caution);
+  --dc-alert-color: var(--dc-color-alert-caution);
 }
 
 .dc-details {
-  margin: var(--dc-space-lg) 0;
+  margin: 0 0 var(--dc-space-block);
   padding: var(--dc-space-sm) var(--dc-space-lg);
   border: var(--dc-border);
   border-radius: var(--dc-radius-md);
+}
+
+.dc-details > summary {
+  cursor: pointer;
+  font-weight: var(--dc-font-weight-medium);
+}
+
+.dc-details > :last-child {
+  margin-bottom: 0;
 }
 
 .dc-annotation {

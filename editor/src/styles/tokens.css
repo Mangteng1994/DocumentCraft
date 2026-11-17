@@ -37,7 +37,11 @@
   --dc-color-annotation-active: rgba(255, 166, 0, 0.6);
   /* 搜索结果中的命中文字，跟随强调色的浅底，在两种主题中自动适配。 */
   --dc-color-search-hit: var(--dc-color-accent-soft);
-  --dc-color-code-surface: #fafafa;
+  --dc-color-code-surface: #f3f3f3;         /* 行内代码与代码块底色，需与白色正文区可分 */
+  --dc-color-quote-bar: #e0e0e0;
+  --dc-color-rule: #eaecef;
+  --dc-color-table-head: #f6f8fa;
+  --dc-color-table-stripe: #fafbfc;
   --dc-color-overlay: rgba(0, 0, 0, 0.4);
   --dc-color-alert-note: #086ddd;
   --dc-color-alert-tip: #00bfbc;
@@ -67,6 +71,18 @@
   --dc-font-size-title: 15px;
   --dc-font-size-welcome: 30px;
 
+  /* 文档排版（DC-067）：取自思源笔记轻量 Markdown 编辑器所用 Vditor 的 vditor-reset，
+     标题与代码按正文字号的比例缩放，正文字号改变时层级关系不变。 */
+  --dc-font-scale-h1: 1.75em;
+  --dc-font-scale-h2: 1.55em;
+  --dc-font-scale-h3: 1.38em;
+  --dc-font-scale-h4: 1.25em;
+  --dc-font-scale-h5: 1.13em;
+  --dc-font-scale-h6: 1em;
+  --dc-font-scale-code: 85%;
+  --dc-font-scale-caption: 0.875em;
+  --dc-font-scale-callout-title: 1em;
+
   /* 字重 */
   --dc-font-weight-regular: 400;
   --dc-font-weight-medium: 500;
@@ -76,7 +92,9 @@
   /* 行高 */
   --dc-line-height-tight: 1.3;
   --dc-line-height-ui: 1.45;
-  --dc-line-height-body: 1.75;
+  --dc-line-height-body: 1.625;             /* 思源 protyle 段落行高 */
+  --dc-line-height-heading: 1.25;
+  --dc-line-height-code: 1.5;
 
   /* 间距 */
   --dc-space-2xs: 2px;
@@ -89,6 +107,16 @@
   --dc-space-3xl: 40px;
   --dc-indent-outline: 12px;
   --dc-indent-tree: 14px;
+  /* 文档块间距（DC-067）：段落、列表、表格、代码块之间统一一档，标题上方加大一档 */
+  --dc-space-block: 16px;
+  --dc-space-heading-top: 24px;
+  --dc-space-list-item: 0.25em;
+  --dc-space-code-y: 0.2em;
+  --dc-space-code-x: 0.4em;
+  --dc-space-quote-bar: 6px;                /* 引用竖条与文字、上下边缘的距离 */
+  --dc-space-cell-y: 6px;
+  --dc-space-cell-x: 13px;
+  --dc-indent-list: 2em;
 
   /* 尺寸 */
   --dc-size-ribbon: 44px;
@@ -133,6 +161,8 @@
   /* 边框 */
   --dc-border-width: 1px;
   --dc-border-width-accent: 3px;
+  --dc-border-width-quote: 0.25em;          /* 引用、提示块左侧圆角竖条 */
+  --dc-border-width-rule: 2px;              /* 分隔线 */
   --dc-border: var(--dc-border-width) solid var(--dc-color-border);
 
   /* 圆角 */
@@ -189,7 +219,11 @@
   --dc-color-success: #44cf6e;
   --dc-color-annotation: rgba(255, 208, 0, 0.25);
   --dc-color-annotation-active: rgba(255, 177, 80, 0.45);
-  --dc-color-code-surface: #242424;
+  --dc-color-code-surface: #2a2a2a;
+  --dc-color-quote-bar: #444444;
+  --dc-color-rule: #363636;
+  --dc-color-table-head: #262626;
+  --dc-color-table-stripe: #222222;
   --dc-color-overlay: rgba(0, 0, 0, 0.6);
   --dc-color-alert-note: #027aff;
   --dc-color-alert-tip: #53dfdd;
