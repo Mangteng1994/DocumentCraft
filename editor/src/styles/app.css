@@ -2645,6 +2645,77 @@ body.is-resizing {
   opacity: var(--dc-opacity-disabled);
 }
 
+/* 文件树拖放、重命名（DC-069）：放置目标高亮、拖动时的提示条、行内重命名输入框 */
+.dc-tree-row.is-drop {
+  background: var(--dc-color-accent-soft);
+  color: var(--dc-color-ink);
+  outline: var(--dc-border-width) solid var(--dc-color-accent);
+  outline-offset: calc(var(--dc-border-width) * -1);
+}
+
+.dc-tree.is-drop-root {
+  outline: var(--dc-border-width) solid var(--dc-color-accent);
+  outline-offset: calc(var(--dc-border-width) * -1);
+}
+
+.dc-tree.is-dragging,
+.dc-tree.is-dragging .dc-tree-row {
+  cursor: grabbing;
+}
+
+.dc-tree-rename {
+  flex: 1;
+  min-width: 0;
+  height: calc(var(--dc-size-tree-row) - var(--dc-space-xs));
+  padding: 0 var(--dc-space-xs);
+  border: var(--dc-border-width) solid var(--dc-color-accent);
+  border-radius: var(--dc-radius-sm);
+  background: var(--dc-color-surface-raised);
+  color: var(--dc-color-ink);
+  font-size: var(--dc-font-size-md);
+  font-family: inherit;
+}
+
+.dc-tree-rename:focus {
+  outline: none;
+}
+
+.dc-tree-ghost {
+  position: fixed;
+  z-index: var(--dc-z-menu);
+  left: calc(var(--dc-drag-x) * 1px + var(--dc-space-lg));
+  top: calc(var(--dc-drag-y) * 1px + var(--dc-space-lg));
+  display: flex;
+  flex-direction: column;
+  gap: var(--dc-space-2xs);
+  max-width: var(--dc-size-workspace-menu);
+  padding: var(--dc-space-xs) var(--dc-space-md);
+  border: var(--dc-border);
+  border-radius: var(--dc-radius-md);
+  background: var(--dc-color-surface-raised);
+  box-shadow: var(--dc-shadow-popover);
+  font-size: var(--dc-font-size-md);
+  pointer-events: none;
+}
+
+.dc-tree-ghost-name {
+  display: flex;
+  align-items: center;
+  gap: var(--dc-space-xs);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.dc-tree-ghost-hint {
+  color: var(--dc-color-accent-text);
+  font-size: var(--dc-font-size-sm);
+}
+
+.dc-tree-ghost.is-invalid .dc-tree-ghost-hint {
+  color: var(--dc-color-ink-faint);
+}
+
 /* 属性窗口（DC-064） */
 .dc-props {
   display: flex;

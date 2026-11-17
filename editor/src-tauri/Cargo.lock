@@ -942,6 +942,7 @@ name = "documentcraft-editor"
 version = "0.3.1"
 dependencies = [
  "chardetng",
+ "clipboard-win",
  "encoding_rs",
  "pdf-extract",
  "serde",

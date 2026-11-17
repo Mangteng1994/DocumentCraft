@@ -267,6 +267,37 @@ export function trashEntry(path: string): Promise<void> {
   return invoke<void>("trash_entry", { path });
 }
 
+/** 重命名（留在原文件夹），返回新路径。已有同名条目时报错，不覆盖（DC-069）。 */
+export function renameEntry(path: string, newName: string): Promise<string> {
+  return invoke<string>("rename_entry", { path, newName });
+}
+
+/** 在文件资源管理器中定位：文件夹直接打开，文件打开所在文件夹并选中（DC-069）。 */
+export function revealEntry(path: string): Promise<void> {
+  return invoke<void>("reveal_entry", { path });
+}
+
+/** 系统剪贴板上的文件列表；cut 为 true 表示剪切（粘贴时移动）。 */
+export interface ClipboardFiles {
+  paths: string[];
+  cut: boolean;
+}
+
+/** 把文件或文件夹写入系统剪贴板，资源管理器等其他程序也能粘贴（DC-069）。 */
+export function clipboardWriteFiles(paths: string[], cut: boolean): Promise<void> {
+  return invoke<void>("clipboard_write_files", { paths, cut });
+}
+
+/** 读取系统剪贴板中的文件列表，没有文件时 paths 为空。 */
+export function clipboardReadFiles(): Promise<ClipboardFiles> {
+  return invoke<ClipboardFiles>("clipboard_read_files");
+}
+
+/** 清空系统剪贴板。 */
+export function clipboardClear(): Promise<void> {
+  return invoke<void>("clipboard_clear");
+}
+
 /** 搜索结果预览中的一个命中块（DC-066）。 */
 export interface PreviewBlock {
   locator: string;

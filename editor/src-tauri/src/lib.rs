@@ -4,6 +4,7 @@
 //! sidecar 和用系统程序打开导出结果。VMark 原有的终端、MCP、多窗口等后端模块不移植；
 //! 自动更新改用官方 `tauri-plugin-updater` 直接检查本项目的 GitHub Release（DC-063），不沿用 VMark 的实现。
 
+mod clipboard;
 mod docflow;
 mod extract;
 mod fileops;
@@ -43,6 +44,23 @@ fn open_path(app: tauri::AppHandle, path: String) -> Result<(), String> {
     opener
         .open_path(path, None::<&str>)
         .map_err(|error| format!("无法打开文件：{error}"))
+}
+
+/// 在文件资源管理器中定位条目（DC-069）：文件夹直接打开，文件则打开所在文件夹并选中它。
+/// 只是显示位置，不会运行文件，所以不受 `open_path` 的程序与脚本限制约束。
+#[tauri::command]
+fn reveal_entry(app: tauri::AppHandle, path: String) -> Result<(), String> {
+    let target = std::path::PathBuf::from(&path);
+    let metadata = std::fs::metadata(&target).map_err(|error| format!("无法读取 {path}：{error}"))?;
+    let opener = app.opener();
+    if metadata.is_dir() {
+        return opener
+            .open_path(path, None::<&str>)
+            .map_err(|error| format!("无法打开文件夹：{error}"));
+    }
+    opener
+        .reveal_item_in_dir(&target)
+        .map_err(|error| format!("无法在资源管理器中显示：{error}"))
 }
 
 /// 内置 Word 模板的文件名。安装版放在 exe 同目录，由 tauri.bundle.conf.json 作为资源安装。
@@ -93,6 +111,10 @@ pub fn run() {
             fileops::copy_entry,
             fileops::move_entry,
             fileops::trash_entry,
+            fileops::rename_entry,
+            clipboard::clipboard_write_files,
+            clipboard::clipboard_read_files,
+            clipboard::clipboard_clear,
             preview::preview_file,
             images::store_image,
             images::import_image,
@@ -103,6 +125,7 @@ pub fn run() {
             docflow::docflow_cancel,
             docflow::docflow_active,
             open_path,
+            reveal_entry,
             builtin_template,
         ]);
     // 更新插件的端点与公钥来自 tauri.conf.json 的 plugins.updater；安装包签名校验失败时插件会拒绝安装。
