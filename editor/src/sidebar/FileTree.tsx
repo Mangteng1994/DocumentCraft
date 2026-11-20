@@ -11,9 +11,9 @@
  * 工作区很大（网络共享、数万文件）时目录树按需加载：打开时只读顶层，展开哪个文件夹才读取哪个。
  */
 
-import { memo, useCallback, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, File, FilePlus, FileText, Folder, FolderOpen, FolderPlus, RefreshCw } from "lucide-react";
+import { ArrowUpDown, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, File, FilePlus, FileText, Folder, FolderOpen, FolderPlus, RefreshCw } from "lucide-react";
 import type { TreeNode } from "../backend";
 import {
   chooseWorkspace,
@@ -32,10 +32,13 @@ import {
   transferAndReport,
 } from "../documentActions";
 import { fileName, parentDirectory, relativePath } from "../paths";
-import type { FileColorRule } from "../settings/schema";
+import { PopupMenu } from "../components/PopupMenu";
+import type { MenuEntry } from "../editor/EditorContextMenu";
+import { SORT_KEYS, type FileColorRule, type SortKey } from "../settings/schema";
 import { useSettings } from "../settings/settingsStore";
 import { useAppStore } from "../store";
 import { iconSize, iconStroke } from "../styles/tokens";
+import { sortNodes } from "./sortTree";
 import { TreeContextMenu, type TreeMenuState } from "./TreeContextMenu";
 
 const MARKDOWN_NAME = /\.(md|markdown)$/i;
@@ -211,6 +214,8 @@ interface RowProps {
   renaming: string | null;
   /** 拖动或外部拖入时高亮的放置目标文件夹。 */
   dropDir: string | null;
+  /** 右键菜单当前指向的条目路径，菜单打开期间保持选中效果。 */
+  menuPath: string | null;
   onToggle: (path: string) => void;
   onSelectDir: (path: string) => void;
   onContextMenu: (x: number, y: number, node: TreeNode) => void;
@@ -221,15 +226,22 @@ interface RowProps {
   onPasteInto: (node: TreeNode) => void;
 }
 
+/** 排序菜单中各依据的显示名。 */
+const SORT_LABELS: Record<SortKey, string> = { name: "名称", modified: "修改时间", type: "文件类型" };
+
 const TreeRow = memo(function TreeRow(props: RowProps) {
-  const { node, depth, activePath, expanded, selectedDir, renaming, dropDir } = props;
+  const { node, depth, activePath, expanded, selectedDir, renaming, dropDir, menuPath } = props;
   const { onToggle, onSelectDir, onContextMenu, onPointerDown, onStartRename, onFinishRename, onCancelRename, onPasteInto } = props;
   // 剪切的条目置灰，提示它粘贴后会被移走。
   const isCut = useAppStore((state) => state.fileClipboard?.mode === "cut" && state.fileClipboard.path === node.path);
+  const sortKey = useSettings((state) => state.settings.files.sortKey);
+  const sortDescending = useSettings((state) => state.settings.files.sortDescending);
+  const sortedChildren = useMemo(() => sortNodes(node.children, sortKey, sortDescending), [node.children, sortKey, sortDescending]);
   const isOpen = expanded.has(node.path);
   const isActive = node.path === activePath;
   const isTarget = node.is_dir && node.path === selectedDir;
   const isDrop = node.is_dir && dropDir !== null && samePath(node.path, dropDir);
+  const isMenuTarget = menuPath !== null && node.path === menuPath;
   const isRenaming = renaming === node.path;
   // 开启「显示所有文件」后出现的非 Markdown 文件：置灰，点击用系统默认应用打开。
   const isOther = !node.is_dir && !MARKDOWN_NAME.test(node.name);
@@ -254,6 +266,7 @@ const TreeRow = memo(function TreeRow(props: RowProps) {
     fileColor ? "has-file-color" : "",
     isCut ? "is-cut" : "",
     isDrop ? "is-drop" : "",
+    isMenuTarget ? "is-menu-target" : "",
   ]
     .filter(Boolean)
     .join(" ");
@@ -269,6 +282,21 @@ const TreeRow = memo(function TreeRow(props: RowProps) {
       return;
     }
     void openDocument(node.path);
+  };
+
+  /** 单击：文件夹展开收起、Markdown 打开；其他文件交给双击，避免单击误调起外部程序。 */
+  const handleClick = () => {
+    if (isOther) {
+      return;
+    }
+    handleActivate();
+  };
+
+  /** 双击：非 Markdown 文件用系统默认程序打开（DC-070）。 */
+  const handleDoubleClick = () => {
+    if (isOther) {
+      handleActivate();
+    }
   };
 
   const handleKeyDown = (event: React.KeyboardEvent) => {
@@ -311,7 +339,8 @@ const TreeRow = memo(function TreeRow(props: RowProps) {
         title={node.path}
         data-tree-path={node.path}
         data-tree-dir={node.is_dir ? "1" : "0"}
-        onClick={handleActivate}
+        onClick={handleClick}
+        onDoubleClick={handleDoubleClick}
         onPointerDown={(event) => onPointerDown(event, node)}
         onContextMenu={(event) => {
           // 阻止冒泡：空白处的右键菜单由外层容器处理，行上的菜单以该行为对象。
@@ -351,7 +380,7 @@ const TreeRow = memo(function TreeRow(props: RowProps) {
       )}
       {node.is_dir && isOpen && node.children.length > 0 && (
         <ul role="group" className="dc-tree-group">
-          {node.children.map((child) => (
+          {sortedChildren.map((child) => (
             <TreeRow
               key={child.path}
               node={child}
@@ -361,6 +390,7 @@ const TreeRow = memo(function TreeRow(props: RowProps) {
               selectedDir={selectedDir}
               renaming={renaming}
               dropDir={dropDir}
+              menuPath={menuPath}
               onToggle={onToggle}
               onSelectDir={onSelectDir}
               onContextMenu={onContextMenu}
@@ -393,6 +423,12 @@ export function FileTree() {
   // 右键菜单：位置和右键的条目，空白处右键时 node 为 null。
   const [menu, setMenu] = useState<TreeMenuState | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
+  // 排序菜单（DC-071）：依据与方向保存在设置中，排序只在渲染时进行。
+  const [sortMenu, setSortMenu] = useState<{ x: number; y: number } | null>(null);
+  const sortKey = useSettings((state) => state.settings.files.sortKey);
+  const sortDescending = useSettings((state) => state.settings.files.sortDescending);
+  const updateSettings = useSettings((state) => state.update);
+  const sortedTreeChildren = useMemo(() => (tree ? sortNodes(tree.children, sortKey, sortDescending) : []), [tree, sortKey, sortDescending]);
   // 树内拖动的状态，以及从外部拖入文件时指针下的目标文件夹。
   const [drag, setDrag] = useState<DragState | null>(null);
   const [externalTarget, setExternalTarget] = useState<string | null>(null);
@@ -662,6 +698,16 @@ export function FileTree() {
     cancelCreate();
   };
 
+  const sortEntries: MenuEntry[] = [
+    ...SORT_KEYS.map((key) => ({
+      label: `${key === sortKey ? "✓ " : "　"}${SORT_LABELS[key]}`,
+      run: () => updateSettings("files", { sortKey: key }),
+    })),
+    "separator",
+    { label: `${sortDescending ? "　" : "✓ "}${sortKey === "modified" ? "最早在前" : "升序"}`, run: () => updateSettings("files", { sortDescending: false }) },
+    { label: `${sortDescending ? "✓ " : "　"}${sortKey === "modified" ? "最近在前" : "降序"}`, run: () => updateSettings("files", { sortDescending: true }) },
+  ];
+
   if (!tree) {
     return (
       <div className="dc-sidebar-empty">
@@ -712,6 +758,18 @@ export function FileTree() {
           <button type="button" className="dc-icon-button" aria-label="全部展开" title="全部展开" onClick={expandAll}>
             <ChevronsUpDown size={iconSize.sm} />
           </button>
+          <button
+            type="button"
+            className="dc-icon-button"
+            aria-label="排序方式"
+            title="排序方式"
+            onClick={(event) => {
+              const rect = event.currentTarget.getBoundingClientRect();
+              setSortMenu({ x: rect.left, y: rect.bottom });
+            }}
+          >
+            <ArrowUpDown size={iconSize.sm} />
+          </button>
           <button type="button" className="dc-icon-button" aria-label="刷新目录" title="刷新目录" onClick={() => void refreshTree()}>
             <RefreshCw size={iconSize.sm} />
           </button>
@@ -756,7 +814,7 @@ export function FileTree() {
         <div className="dc-sidebar-empty">此文件夹中没有 Markdown 文件，可用上方按钮新建，或把文件拖到这里。</div>
       ) : (
         <ul role="tree" aria-label="工作区文件" className="dc-tree-root">
-          {tree.children.map((child) => (
+          {sortedTreeChildren.map((child) => (
             <TreeRow
               key={child.path}
               node={child}
@@ -766,6 +824,7 @@ export function FileTree() {
               selectedDir={selectedDir}
               renaming={renaming}
               dropDir={dropDir}
+              menuPath={menu?.node?.path ?? null}
               onToggle={handleToggle}
               onSelectDir={setSelectedDir}
               onContextMenu={openMenu}
@@ -778,6 +837,7 @@ export function FileTree() {
           ))}
         </ul>
       )}
+      {sortMenu && <PopupMenu x={sortMenu.x} y={sortMenu.y} entries={sortEntries} onClose={() => setSortMenu(null)} />}
       {menu && <TreeContextMenu menu={menu} rootPath={tree.path} onRename={startRename} onPasted={revealFolder} onClose={closeMenu} />}
       {drag && (
         <div className={`dc-tree-ghost${drag.target ? "" : " is-invalid"}`} style={ghostStyle}>

@@ -14,6 +14,11 @@ export default defineConfig({
   server: {
     port: 1430,
     strictPort: true,
+    watch: {
+      // Rust 构建产物（target/debug 下的 exe、pdb）在应用运行时被系统占用，
+      // 监视它们会在 Windows 上持续报 EBUSY；前端热更新也不依赖这些文件。
+      ignored: ["**/src-tauri/**"],
+    },
   },
   build: {
     target: "es2022",

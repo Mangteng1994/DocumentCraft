@@ -573,7 +573,8 @@ textarea {
   color: var(--dc-color-ink);
 }
 
-.dc-tree-row.is-active {
+.dc-tree-row.is-active,
+.dc-tree-row.is-menu-target {
   background: var(--dc-color-surface-selected);
   color: var(--dc-color-ink);
 }
@@ -2054,19 +2055,29 @@ textarea {
 }
 
 .dc-editor-host {
-  max-width: var(--dc-size-document);
+  max-width: var(--dc-editor-width, var(--dc-size-document));
   margin: 0 auto;
-  padding: var(--dc-space-2xl) var(--dc-space-2xl) var(--dc-space-3xl);
+  padding: var(--dc-space-2xl) var(--dc-editor-margin, var(--dc-space-editor-margin-medium)) var(--dc-space-3xl);
 }
+
+/* 编辑区排版设置（DC-071）由 useEditorAppearance 写在根元素的 data 属性上 */
+:root[data-editor-width="narrow"] { --dc-editor-width: var(--dc-size-document-narrow); }
+:root[data-editor-width="wide"] { --dc-editor-width: var(--dc-size-document-wide); }
+:root[data-editor-width="full"] { --dc-editor-width: none; }
+:root[data-editor-margin="small"] { --dc-editor-margin: var(--dc-space-editor-margin-small); }
+:root[data-editor-margin="large"] { --dc-editor-margin: var(--dc-space-editor-margin-large); }
+:root[data-editor-line="compact"] { --dc-editor-line-height: var(--dc-line-height-body-compact); }
+:root[data-editor-line="loose"] { --dc-editor-line-height: var(--dc-line-height-body-loose); }
+:root[data-editor-font="serif"] { --dc-editor-font: var(--dc-font-document-serif); }
 
 .dc-document {
   min-height: 100%;
   outline: none;
   color: var(--dc-color-ink);
-  font-family: var(--dc-font-document);
-  font-size: var(--dc-font-size-body);
+  font-family: var(--dc-editor-font, var(--dc-font-document));
+  font-size: var(--dc-editor-font-size, var(--dc-font-size-body));
   font-variant-ligatures: no-common-ligatures;
-  line-height: var(--dc-line-height-body);
+  line-height: var(--dc-editor-line-height, var(--dc-line-height-body));
   word-wrap: break-word;
   word-break: break-word;
 }

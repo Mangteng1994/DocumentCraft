@@ -54,6 +54,7 @@
   /* 字体：Obsidian 使用系统界面字体，中文回退到微软雅黑 */
   --dc-font-ui: "Segoe UI", -apple-system, "Microsoft YaHei UI", "PingFang SC", system-ui, sans-serif;
   --dc-font-document: "Segoe UI", -apple-system, "Microsoft YaHei", "PingFang SC", system-ui, sans-serif;
+  --dc-font-document-serif: "Source Han Serif SC", "Noto Serif CJK SC", "Songti SC", SimSun, Georgia, serif;
   --dc-font-mono: "Cascadia Mono", Consolas, "Courier New", monospace;
 
   /* 字号 */
@@ -93,6 +94,8 @@
   --dc-line-height-tight: 1.3;
   --dc-line-height-ui: 1.45;
   --dc-line-height-body: 1.625;             /* 思源 protyle 段落行高 */
+  --dc-line-height-body-compact: 1.45;
+  --dc-line-height-body-loose: 1.85;
   --dc-line-height-heading: 1.25;
   --dc-line-height-code: 1.5;
 
@@ -105,6 +108,10 @@
   --dc-space-xl: 16px;
   --dc-space-2xl: 24px;
   --dc-space-3xl: 40px;
+  /* 编辑区左右页边距；左侧要容纳标题级别标记（H1～H6），不能小于 24px */
+  --dc-space-editor-margin-small: 24px;
+  --dc-space-editor-margin-medium: 40px;
+  --dc-space-editor-margin-large: 64px;
   --dc-indent-outline: 12px;
   --dc-indent-tree: 14px;
   /* 文档块间距（DC-067）：段落、列表、表格、代码块之间统一一档，标题上方加大一档 */
@@ -133,7 +140,9 @@
   --dc-size-control: 30px;
   --dc-size-icon-button: 28px;
   --dc-size-ribbon-button: 32px;
-  --dc-size-document: 760px;
+  --dc-size-document: 920px;                /* 编辑区页面宽度：标准 */
+  --dc-size-document-narrow: 720px;
+  --dc-size-document-wide: 1120px;
   --dc-size-dialog: 520px;
   --dc-size-settings: 860px;
   --dc-size-settings-height: 600px;

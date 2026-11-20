@@ -31,7 +31,7 @@ import { useAutoUpdate } from "./features/updater/useAutoUpdate";
 import { chooseFile, chooseWorkspace } from "./documentActions";
 import { fileName } from "./paths";
 import { useSettings } from "./settings/settingsStore";
-import { useTheme } from "./settings/theme";
+import { useEditorAppearance, useTheme } from "./settings/theme";
 import { useHotkeys } from "./settings/useHotkeys";
 import { useAppStore, type Overlay } from "./store";
 import { iconSize, iconStroke } from "./styles/tokens";
@@ -95,6 +95,7 @@ export function App() {
   const layout = useSettings((state) => state.settings.layout);
 
   useTheme();
+  useEditorAppearance();
   useHotkeys();
   useAutoUpdate();
 

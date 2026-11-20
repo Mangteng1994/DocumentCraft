@@ -15,6 +15,8 @@ export interface TreeNode {
   truncated: boolean;
   /** 工作区很大，目录树改为按需加载（只对根节点有意义）。 */
   lazy: boolean;
+  /** 最后修改时间（毫秒时间戳），读不到时为 0。 */
+  modified: number;
 }
 
 /**

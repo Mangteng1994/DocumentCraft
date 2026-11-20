@@ -13,6 +13,25 @@ export type FigureStyle = "mono" | "colored";
 export type SendShortcut = "enter" | "shift-enter";
 export type CopilotMode = "chat" | "vault";
 
+/** 目录树排序依据：名称、修改时间、文件类型（扩展名）。文件夹始终排在文件之前。 */
+export const SORT_KEYS = ["name", "modified", "type"] as const;
+export type SortKey = (typeof SORT_KEYS)[number];
+
+/** 编辑区（DC-071）：页面宽度、左右页边距、行高、字体族的取值，对应 tokens.css 中的令牌。 */
+export const EDITOR_WIDTHS = ["narrow", "standard", "wide", "full"] as const;
+export const EDITOR_MARGINS = ["small", "medium", "large"] as const;
+export const EDITOR_LINE_HEIGHTS = ["compact", "standard", "loose"] as const;
+export const EDITOR_FONTS = ["sans", "serif"] as const;
+export type EditorWidth = (typeof EDITOR_WIDTHS)[number];
+export type EditorMargin = (typeof EDITOR_MARGINS)[number];
+export type EditorLineHeight = (typeof EDITOR_LINE_HEIGHTS)[number];
+export type EditorFont = (typeof EDITOR_FONTS)[number];
+
+/** 编辑区字体大小（像素）的可调范围。 */
+export const EDITOR_FONT_SIZE_MIN = 14;
+export const EDITOR_FONT_SIZE_MAX = 22;
+export const EDITOR_FONT_SIZE_DEFAULT = 16;
+
 /** 五彩文档大纲的一条着色规则：扩展名（小写、带点，如 ".docx"）与 HEX 颜色（#RRGGBB）。 */
 export interface FileColorRule {
   extensions: string[];
@@ -52,6 +71,17 @@ export interface Settings {
     showAllFiles: boolean;
     /** 侧栏搜索的范围，见 SEARCH_MODES。 */
     searchMode: SearchMode;
+    /** 目录树排序依据与方向（DC-071）。 */
+    sortKey: SortKey;
+    sortDescending: boolean;
+  };
+  /** 编辑区排版（DC-071）。 */
+  editor: {
+    fontSize: number;
+    width: EditorWidth;
+    margin: EditorMargin;
+    lineHeight: EditorLineHeight;
+    fontFamily: EditorFont;
   };
   hotkeys: Hotkeys;
   /** 五彩文档大纲（DC-068）：开启后目录树按扩展名给文件的图标和名称着色。 */
@@ -148,7 +178,8 @@ function defaultHotkeys(): Hotkeys {
 
 export const DEFAULT_SETTINGS: Settings = {
   appearance: { theme: "system" },
-  files: { showAllFiles: false, searchMode: "all" },
+  files: { showAllFiles: false, searchMode: "all", sortKey: "name", sortDescending: false },
+  editor: { fontSize: EDITOR_FONT_SIZE_DEFAULT, width: "standard", margin: "medium", lineHeight: "standard", fontFamily: "sans" },
   hotkeys: defaultHotkeys(),
   colorfulOutline: { enabled: false, rules: defaultFileColorRules() },
   copilot: {
@@ -243,12 +274,33 @@ export function normalizeSettings(saved: unknown): Settings {
   if (!SEARCH_MODES.includes(files.searchMode)) {
     files.searchMode = DEFAULT_SETTINGS.files.searchMode;
   }
+  if (!SORT_KEYS.includes(files.sortKey)) {
+    files.sortKey = DEFAULT_SETTINGS.files.sortKey;
+  }
+  const editor = mergeSection(DEFAULT_SETTINGS.editor, root.editor);
+  // 设置文件被手改成范围外的取值时回退默认值，避免写出无效的样式变量。
+  if (!EDITOR_WIDTHS.includes(editor.width)) {
+    editor.width = DEFAULT_SETTINGS.editor.width;
+  }
+  if (!EDITOR_MARGINS.includes(editor.margin)) {
+    editor.margin = DEFAULT_SETTINGS.editor.margin;
+  }
+  if (!EDITOR_LINE_HEIGHTS.includes(editor.lineHeight)) {
+    editor.lineHeight = DEFAULT_SETTINGS.editor.lineHeight;
+  }
+  if (!EDITOR_FONTS.includes(editor.fontFamily)) {
+    editor.fontFamily = DEFAULT_SETTINGS.editor.fontFamily;
+  }
+  const sizeValid = Number.isFinite(editor.fontSize);
+  const sizeClamped = Math.min(Math.max(Math.round(editor.fontSize), EDITOR_FONT_SIZE_MIN), EDITOR_FONT_SIZE_MAX);
+  editor.fontSize = sizeValid ? sizeClamped : EDITOR_FONT_SIZE_DEFAULT;
   if (hotkeys.searchWorkspace === LEGACY_SEARCH_HOTKEY) {
     hotkeys.searchWorkspace = DEFAULT_SETTINGS.hotkeys.searchWorkspace;
   }
   return {
     appearance: mergeSection(DEFAULT_SETTINGS.appearance, root.appearance),
     files,
+    editor,
     hotkeys,
     colorfulOutline: normalizeColorfulOutline(root.colorfulOutline),
     copilot: mergeSection(DEFAULT_SETTINGS.copilot, root.copilot),

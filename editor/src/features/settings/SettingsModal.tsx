@@ -11,6 +11,7 @@ import { useAppStore, type SettingsTab } from "../../store";
 import { iconSize } from "../../styles/tokens";
 import { AIConnectionSettings } from "./AIConnectionSettings";
 import { AppearanceSettings } from "./AppearanceSettings";
+import { EditorSettings } from "./EditorSettings";
 import { CopilotSettings } from "./CopilotSettings";
 import { FilesSettings } from "./FilesSettings";
 import { FigureSettings } from "./FigureSettings";
@@ -23,6 +24,7 @@ const GROUPS: { title: string; tabs: { id: SettingsTab; label: string }[] }[] = 
     title: "选项",
     tabs: [
       { id: "appearance", label: "外观" },
+      { id: "editor", label: "编辑器" },
       { id: "files", label: "文件" },
       { id: "hotkeys", label: "快捷键" },
       { id: "update", label: "关于与更新" },
@@ -46,6 +48,7 @@ const GROUPS: { title: string; tabs: { id: SettingsTab; label: string }[] }[] = 
 
 const TAB_CONTENT: Record<SettingsTab, () => ReactNode> = {
   appearance: () => <AppearanceSettings />,
+  editor: () => <EditorSettings />,
   files: () => <FilesSettings />,
   hotkeys: () => <HotkeySettings />,
   copilot: () => <CopilotSettings />,

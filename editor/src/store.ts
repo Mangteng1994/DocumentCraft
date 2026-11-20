@@ -11,7 +11,7 @@ import type { SearchMode } from "./settings/schema";
 
 export type SidebarView = "files" | "outline";
 export type RightPanel = "comments" | "copilot" | null;
-export type SettingsTab = "appearance" | "files" | "hotkeys" | "copilot" | "ai" | "word" | "figure" | "update";
+export type SettingsTab = "appearance" | "editor" | "files" | "hotkeys" | "copilot" | "ai" | "word" | "figure" | "update";
 
 /**
  * 文件树里复制或剪切的条目。用来给剪切的条目置灰；system 为 true 表示已经写入系统剪贴板（粘贴时以系统剪贴板为准），

@@ -172,7 +172,7 @@ export function ColorfulOutlineSettings() {
     <>
       <SettingItem
         name="五彩文档大纲"
-        description="勾选后目录树按扩展名给文件的图标和名称着色，默认 .docx 蓝、.xlsx 绿、.pdf 红、.pptx 与 .ppt 橙（莫兰迪色）。非 Markdown 文件需开启「显示所有文件」才会出现在目录树中。"
+        description="勾选后目录树按扩展名给文件的图标和名称着色。非 Markdown 文件需开启「显示所有文件」才会出现在目录树中。"
       >
         {enabled && (
           <button type="button" className="dc-button" onClick={() => setConfigOpen(true)}>

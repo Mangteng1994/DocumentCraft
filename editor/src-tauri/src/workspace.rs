@@ -34,6 +34,8 @@ pub struct TreeNode {
     truncated: bool,
     /// 目录树以按需加载模式返回（只对根节点有意义）：只读了顶层，不含 Markdown 的文件夹也会显示。
     lazy: bool,
+    /// 最后修改时间（毫秒时间戳），读不到时为 0。供前端按修改时间排序。
+    modified: u64,
 }
 
 impl TreeNode {
@@ -50,10 +52,11 @@ impl TreeNode {
             loaded: false,
             truncated: false,
             lazy: false,
+            modified: 0,
         }
     }
 
-    fn file(name: String, path: &Path) -> TreeNode {
+    fn file(name: String, path: &Path, modified: u64) -> TreeNode {
         TreeNode {
             name,
             path: path.to_string_lossy().into_owned(),
@@ -62,8 +65,20 @@ impl TreeNode {
             loaded: true,
             truncated: false,
             lazy: false,
+            modified,
         }
     }
+}
+
+/// 取条目的最后修改时间（毫秒时间戳）；平台不支持或读取失败时返回 0，排序时按最旧处理。
+fn modified_millis(metadata: &fs::Metadata) -> u64 {
+    let Ok(modified) = metadata.modified() else {
+        return 0;
+    };
+    let Ok(elapsed) = modified.duration_since(std::time::UNIX_EPOCH) else {
+        return 0;
+    };
+    elapsed.as_millis() as u64
 }
 
 fn is_markdown(path: &Path) -> bool {
@@ -153,9 +168,11 @@ fn read_level(path: &Path, show_all: bool) -> Result<TreeNode, String> {
         }
         let entry_path = entry.path();
         if metadata.is_dir() {
-            directories.push(TreeNode::directory(&entry_path));
+            let mut directory = TreeNode::directory(&entry_path);
+            directory.modified = modified_millis(&metadata);
+            directories.push(directory);
         } else if show_all || is_markdown(&entry_path) {
-            files.push(TreeNode::file(entry_name, &entry_path));
+            files.push(TreeNode::file(entry_name, &entry_path, modified_millis(&metadata)));
         }
     }
     directories.sort_by_key(|item| item.name.to_lowercase());
@@ -198,7 +215,8 @@ fn read_dir_node(path: &Path, depth: usize, show_all: bool, budget: &mut Budget)
         }
         let entry_path = entry.path();
         if metadata.is_dir() {
-            if let Some(child) = read_dir_node(&entry_path, depth + 1, show_all, budget) {
+            if let Some(mut child) = read_dir_node(&entry_path, depth + 1, show_all, budget) {
+                child.modified = modified_millis(&metadata);
                 // 默认只保留包含 Markdown 的目录，目录树聚焦于可阅读的文档。完全空的目录也保留，
                 // 否则刚新建的文件夹会立刻从目录树消失；显示全部文件时所有目录都保留。
                 if show_all || !child.children.is_empty() || is_empty_dir(&entry_path) {
@@ -208,7 +226,7 @@ fn read_dir_node(path: &Path, depth: usize, show_all: bool, budget: &mut Budget)
                 return None;
             }
         } else if show_all || is_markdown(&entry_path) {
-            files.push(TreeNode::file(entry_name, &entry_path));
+            files.push(TreeNode::file(entry_name, &entry_path, modified_millis(&metadata)));
         }
     }
     directories.sort_by_key(|item| item.name.to_lowercase());
