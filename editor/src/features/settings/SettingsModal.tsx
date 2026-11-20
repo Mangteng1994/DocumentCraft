@@ -63,8 +63,14 @@ export function SettingsModal({ tab }: { tab: SettingsTab }) {
 
   useEffect(() => {
     const handleKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") {
+        return;
+      }
       // 快捷键录制框获得焦点时，Esc 由录制框处理。
-      if (event.key === "Escape" && !(event.target as HTMLElement).closest("[data-hotkey-recorder]")) {
+      const inRecorder = (event.target as HTMLElement).closest("[data-hotkey-recorder]") !== null;
+      // 设置内弹出的子窗口（如五彩文档大纲配置）自己处理 Esc，只关闭子窗口。
+      const subdialogOpen = document.querySelector("[data-settings-subdialog]") !== null;
+      if (!inRecorder && !subdialogOpen) {
         setOverlay(null);
       }
     };

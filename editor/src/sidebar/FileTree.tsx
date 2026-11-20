@@ -32,6 +32,8 @@ import {
   transferAndReport,
 } from "../documentActions";
 import { fileName, parentDirectory, relativePath } from "../paths";
+import type { FileColorRule } from "../settings/schema";
+import { useSettings } from "../settings/settingsStore";
 import { useAppStore } from "../store";
 import { iconSize, iconStroke } from "../styles/tokens";
 import { TreeContextMenu, type TreeMenuState } from "./TreeContextMenu";
@@ -42,6 +44,26 @@ const MARKDOWN_NAME = /\.(md|markdown)$/i;
 const DRAG_THRESHOLD = 5;
 
 type CreateKind = "note" | "folder";
+
+/**
+ * 五彩文档大纲（DC-068）：按文件名结尾匹配规则，返回颜色；没有命中返回 null。
+ *
+ * 多条规则都命中时取扩展名最长的一条，例如 ".tar.gz" 优先于 ".gz"。
+ */
+function fileColorFor(name: string, rules: FileColorRule[]): string | null {
+  const lowerName = name.toLowerCase();
+  let bestColor: string | null = null;
+  let bestLength = 0;
+  for (const rule of rules) {
+    for (const extension of rule.extensions) {
+      if (extension.length > bestLength && lowerName.endsWith(extension)) {
+        bestColor = rule.color;
+        bestLength = extension.length;
+      }
+    }
+  }
+  return bestColor;
+}
 
 /** 收集树中已读取的文件夹的路径（不含根目录本身），供「全部展开」使用。按需加载时不会因此去读取未读取的文件夹。 */
 function collectLoadedDirectories(node: TreeNode, result: Set<string>): Set<string> {
@@ -211,12 +233,25 @@ const TreeRow = memo(function TreeRow(props: RowProps) {
   const isRenaming = renaming === node.path;
   // 开启「显示所有文件」后出现的非 Markdown 文件：置灰，点击用系统默认应用打开。
   const isOther = !node.is_dir && !MARKDOWN_NAME.test(node.name);
-  const indent = { "--dc-tree-depth": depth } as React.CSSProperties;
+  // 选择器只返回颜色字符串，规则变化时只有颜色变了的行重新渲染。
+  const fileColor = useSettings((state) => {
+    const colorful = state.settings.colorfulOutline;
+    if (node.is_dir || !colorful.enabled) {
+      return null;
+    }
+    return fileColorFor(node.name, colorful.rules);
+  });
+  const rowStyle: Record<string, string | number> = { "--dc-tree-depth": depth };
+  if (fileColor) {
+    rowStyle["--dc-tree-file-color"] = fileColor;
+  }
+  const indent = rowStyle as React.CSSProperties;
   const className = [
     "dc-tree-row",
     isActive ? "is-active" : "",
     isTarget ? "is-target" : "",
     isOther ? "is-other" : "",
+    fileColor ? "has-file-color" : "",
     isCut ? "is-cut" : "",
     isDrop ? "is-drop" : "",
   ]

@@ -484,6 +484,17 @@ textarea {
   opacity: var(--dc-opacity-disabled);
 }
 
+/* 五彩文档大纲（DC-068）：颜色来自用户设置（HEX），经行内 --dc-tree-file-color 传入。
+   着色的文件不再整体置灰，否则莫兰迪色会被冲淡到难以分辨。 */
+.dc-tree-row.has-file-color {
+  opacity: 1;
+}
+
+.dc-tree-row.has-file-color .dc-tree-icon,
+.dc-tree-row.has-file-color .dc-tree-name {
+  color: var(--dc-tree-file-color);
+}
+
 .dc-sidebar-empty {
   display: flex;
   flex-direction: column;
@@ -1743,6 +1754,38 @@ textarea {
 .dc-setting-control .dc-input {
   width: auto;
   min-width: var(--dc-size-hotkey);
+}
+
+/* 五彩文档大纲配置：色块、HEX、扩展名、删除按钮一行一条规则。 */
+.dc-color-rules {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dc-space-sm);
+}
+
+.dc-color-rule {
+  display: grid;
+  grid-template-columns: var(--dc-size-control) var(--dc-size-hex-input) minmax(0, 1fr) var(--dc-size-icon-button);
+  align-items: center;
+  gap: var(--dc-space-sm);
+}
+
+.dc-color-swatch {
+  width: var(--dc-size-control);
+  height: var(--dc-size-control);
+  padding: 0;
+  border: var(--dc-border);
+  border-radius: var(--dc-radius-md);
+  background: transparent;
+  cursor: pointer;
+}
+
+.dc-color-rule .dc-input.is-invalid {
+  border-color: var(--dc-color-danger);
+}
+
+.dc-color-preview {
+  font-size: var(--dc-font-size-md);
 }
 
 .dc-setting-heading {
