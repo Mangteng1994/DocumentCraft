@@ -31,3 +31,7 @@ encoding_rs = "0.8"
 # 自动更新插件只用于桌面端，签名校验、下载与 NSIS 安装由插件完成（DC-063）。
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-updater = "2"
+
+# 文件树的复制、剪切要写入系统剪贴板的文件列表（CF_HDROP），资源管理器才能粘贴；也要读取资源管理器复制的文件（DC-069）。
+[target.'cfg(windows)'.dependencies]
+clipboard-win = "5"

@@ -13,10 +13,14 @@ export type SidebarView = "files" | "outline";
 export type RightPanel = "comments" | "copilot" | null;
 export type SettingsTab = "appearance" | "files" | "hotkeys" | "copilot" | "ai" | "word" | "figure" | "update";
 
-/** 文件树里复制或剪切的条目（只在应用内记录，粘贴时由后端复制或移动）。 */
+/**
+ * 文件树里复制或剪切的条目。用来给剪切的条目置灰；system 为 true 表示已经写入系统剪贴板（粘贴时以系统剪贴板为准），
+ * 为 false 表示系统剪贴板不可用，只能在本应用内粘贴（DC-069）。
+ */
 export interface FileClipboard {
   path: string;
   mode: "copy" | "cut";
+  system: boolean;
 }
 
 /** 搜索结果预览页要显示的文件和搜索条件（DC-066）。 */

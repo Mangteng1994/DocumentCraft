@@ -1,4 +1,4 @@
-//! 文件树右键菜单的后端（DC-064）：复制、移动、移入回收站和属性。
+//! 文件树右键菜单的后端（DC-064、DC-069）：复制、移动、重命名、移入回收站和属性。
 //!
 //! 约定：
 //! - 复制和移动到目标文件夹时，重名条目自动改名为「名称 - 副本」，绝不覆盖已有文件；
@@ -195,6 +195,75 @@ pub async fn trash_entry(path: String) -> Result<(), String> {
     task.await.map_err(|error| error.to_string())?
 }
 
+/// Windows 保留的设备名，文件名主体（不含扩展名）不能是它们，否则无法创建或会指向设备。
+const RESERVED_NAMES: [&str; 22] = [
+    "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9", "LPT1", "LPT2",
+    "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+];
+
+/// Windows 文件名中不允许出现的字符（路径分隔符、盘符冒号和通配符等）。
+const FORBIDDEN_NAME_CHARS: &str = "<>:\"/\\|?*";
+
+/// 校验新名称，返回去掉首尾空白后的名称。规则按 Windows 文件名：不含路径分隔符和 `<>:"|?*`、控制字符，
+/// 不以点结尾（Windows 会悄悄去掉它，导致名称与预期不符），不是保留设备名。
+fn validate_new_name(name: &str) -> Result<String, String> {
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return Err("名称不能为空。".to_string());
+    }
+    if trimmed == "." || trimmed == ".." {
+        return Err("名称不能是 . 或 ..。".to_string());
+    }
+    let bad = trimmed
+        .chars()
+        .find(|ch| ch.is_control() || FORBIDDEN_NAME_CHARS.contains(*ch));
+    if let Some(bad) = bad {
+        return Err(format!("名称不能包含字符 {bad}（不允许 \\ / : * ? \" < > |）。"));
+    }
+    if trimmed.ends_with('.') {
+        return Err("名称不能以点结尾。".to_string());
+    }
+    let stem = trimmed.split('.').next().unwrap_or("").trim_end().to_ascii_uppercase();
+    if RESERVED_NAMES.contains(&stem.as_str()) {
+        return Err(format!("「{stem}」是系统保留名称，请换一个。"));
+    }
+    Ok(trimmed.to_string())
+}
+
+/// 把条目改名（留在原文件夹），返回新路径。已有同名条目时报错，不覆盖；只改大小写时允许。
+fn rename_entry_blocking(path: &str, new_name: &str) -> Result<String, String> {
+    let (source, _) = existing_entry(path)?;
+    let name = validate_new_name(new_name)?;
+    let parent = source
+        .parent()
+        .ok_or_else(|| "无法确定所在文件夹（可能是磁盘根目录）。".to_string())?;
+    let current = entry_name(&source)?;
+    if current == name {
+        return Ok(source.to_string_lossy().into_owned());
+    }
+    let target = parent.join(&name);
+    if fs::symlink_metadata(&target).is_ok() {
+        // Windows 不区分大小写：只改大小写时目标「已存在」其实就是它自己，要放行；其他情况才算重名。
+        let only_case = current.to_lowercase() == name.to_lowercase();
+        let same_file = match (fs::canonicalize(&source), fs::canonicalize(&target)) {
+            (Ok(left), Ok(right)) => left == right,
+            _ => false,
+        };
+        if !(only_case && same_file) {
+            return Err(format!("这个文件夹里已经有名为「{name}」的条目。"));
+        }
+    }
+    fs::rename(&source, &target).map_err(|error| format!("无法重命名：{error}"))?;
+    Ok(target.to_string_lossy().into_owned())
+}
+
+/// 重命名文件或文件夹，返回新路径。重名时报错，不覆盖。
+#[tauri::command]
+pub async fn rename_entry(path: String, new_name: String) -> Result<String, String> {
+    let task = tauri::async_runtime::spawn_blocking(move || rename_entry_blocking(&path, &new_name));
+    task.await.map_err(|error| error.to_string())?
+}
+
 /// 属性窗口显示的信息。时间为 Unix 毫秒，读取不到时为 None。
 #[derive(Serialize)]
 pub struct FileProperties {
@@ -362,6 +431,62 @@ mod tests {
         assert!(!source.exists());
         assert_eq!(fs::read_to_string(&moved).unwrap(), "x");
         let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn rename_changes_the_name_and_keeps_the_content() {
+        let root = scratch("rename");
+        let source = root.join("旧名.md");
+        fs::write(&source, "正文").unwrap();
+
+        let renamed = rename_entry_blocking(source.to_str().unwrap(), " 新名.md ").unwrap();
+
+        assert!(renamed.ends_with("新名.md"));
+        assert!(!source.exists());
+        assert_eq!(fs::read_to_string(&renamed).unwrap(), "正文");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn rename_never_overwrites_an_existing_entry() {
+        let root = scratch("rename-dup");
+        let first = root.join("a.md");
+        let second = root.join("b.md");
+        fs::write(&first, "A").unwrap();
+        fs::write(&second, "B").unwrap();
+
+        let result = rename_entry_blocking(first.to_str().unwrap(), "b.md");
+
+        assert!(result.is_err());
+        assert_eq!(fs::read_to_string(&second).unwrap(), "B");
+        assert!(first.exists());
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn rename_works_for_folders() {
+        let root = scratch("rename-dir");
+        let folder = root.join("notes");
+        fs::create_dir(&folder).unwrap();
+        fs::write(folder.join("x.md"), "x").unwrap();
+
+        let renamed = rename_entry_blocking(folder.to_str().unwrap(), "Notes").unwrap();
+
+        assert!(renamed.ends_with("Notes"));
+        assert!(Path::new(&renamed).join("x.md").exists());
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn invalid_names_are_rejected() {
+        let rejected = ["", "  ", ".", "..", "a/b", "a\\b", "a:b", "a*b", "a?b", "a<b", "a|b", "a\"b", "end.", "CON", "nul.txt", "Com1"];
+        for bad in rejected {
+            assert!(validate_new_name(bad).is_err(), "应当拒绝：{bad:?}");
+        }
+        let accepted = ["报告.md", "a b.txt", ".gitignore", "文件 (2).docx", "console.md"];
+        for good in accepted {
+            assert!(validate_new_name(good).is_ok(), "应当接受：{good:?}");
+        }
     }
 
     #[test]

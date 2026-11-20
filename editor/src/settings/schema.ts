@@ -54,7 +54,7 @@ export interface Settings {
     searchMode: SearchMode;
   };
   hotkeys: Hotkeys;
-  /** 五彩文档大纲（DC-067）：开启后目录树按扩展名给文件的图标和名称着色。 */
+  /** 五彩文档大纲（DC-068）：开启后目录树按扩展名给文件的图标和名称着色。 */
   colorfulOutline: {
     enabled: boolean;
     rules: FileColorRule[];

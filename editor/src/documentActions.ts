@@ -5,6 +5,9 @@
 import { ask, open } from "@tauri-apps/plugin-dialog";
 import { writeText as writeClipboard } from "@tauri-apps/plugin-clipboard-manager";
 import {
+  clipboardClear,
+  clipboardReadFiles,
+  clipboardWriteFiles,
   copyEntry,
   createFolder,
   createMarkdown,
@@ -15,6 +18,8 @@ import {
   moveEntry,
   openPath,
   readText,
+  renameEntry,
+  revealEntry,
   trashEntry,
   writeText,
 } from "./backend";
@@ -404,7 +409,7 @@ export function selectNote(id: string | null): void {
 // ---------------------------------------------------------------------------
 
 /** path 是否等于 folder，或位于 folder 之内（不区分大小写，兼容两种分隔符）。 */
-function isInside(path: string, folder: string): boolean {
+export function isInside(path: string, folder: string): boolean {
   const lower = path.toLowerCase();
   const base = folder.toLowerCase().replace(/[\\/]+$/, "");
   return lower === base || lower.startsWith(`${base}\\`) || lower.startsWith(`${base}/`);
@@ -418,39 +423,203 @@ function openTabsInside(path: string): string[] {
     .filter((tabPath) => isInside(tabPath, path));
 }
 
-/** 把文件树中的条目记入应用内的复制或剪切状态，粘贴时再执行。 */
-export function copyEntryToClipboard(path: string, mode: "copy" | "cut"): void {
-  const store = useAppStore.getState();
-  store.setFileClipboard({ path, mode });
-  store.setStatus(`${mode === "copy" ? "已复制" : "已剪切"}「${fileName(path)}」，在目标文件夹上右键选择粘贴`);
+/** path 位于 from（文件或文件夹）之内时，把前缀 from 换成 to，得到搬家后的路径；不在其内则原样返回。 */
+export function remapPath(path: string, from: string, to: string): string {
+  if (!isInside(path, from)) {
+    return path;
+  }
+  const base = from.replace(/[\\/]+$/, "");
+  return to.replace(/[\\/]+$/, "") + path.slice(base.length);
 }
 
-/** 把剪贴板中的条目粘贴到 targetDir。复制保留剪贴板，可重复粘贴；剪切成功后清空。重名自动改名，不覆盖。 */
-export async function pasteEntry(targetDir: string): Promise<void> {
+/**
+ * 移动、重命名之前先关闭受影响的页签：页签仍指向旧路径时，保存会把文件写回旧位置。有未保存修改时由 closeTab 询问。
+ * ok 为 false 表示用户取消；activePath 是关闭前正在显示、且受影响的文件，事后据此重新打开。
+ */
+async function closeTabsInside(path: string): Promise<{ ok: boolean; activePath: string }> {
+  const current = useAppStore.getState().filePath;
+  const activePath = current && isInside(current, path) ? current : "";
+  for (const tabPath of openTabsInside(path)) {
+    const closed = await closeTab(tabPath);
+    if (!closed) {
+      return { ok: false, activePath: "" };
+    }
+  }
+  return { ok: true, activePath };
+}
+
+/** 条目搬家后，剪贴板记录和搜索预览页里指向旧路径的部分已经失效，清掉。 */
+function forgetRelocated(path: string): void {
   const store = useAppStore.getState();
   const clipboard = store.fileClipboard;
-  if (!clipboard) {
-    store.setStatus("没有可粘贴的内容，请先复制或剪切文件。");
-    return;
+  if (clipboard && isInside(clipboard.path, path)) {
+    store.setFileClipboard(null);
   }
-  const name = fileName(clipboard.path);
+  const preview = store.preview;
+  if (preview && isInside(preview.path, path)) {
+    store.setPreview(null);
+  }
+}
+
+/** 把文件树中的条目复制或剪切到系统剪贴板（DC-069）：资源管理器、桌面和其他程序都能粘贴。 */
+export async function copyEntryToClipboard(path: string, mode: "copy" | "cut"): Promise<void> {
+  const store = useAppStore.getState();
+  const verb = mode === "copy" ? "已复制" : "已剪切";
+  const name = fileName(path);
   try {
-    if (clipboard.mode === "cut") {
-      // 页签里正在编辑的文件移动后，页签仍指向旧路径，会误保存回旧位置，所以要求先关闭。
-      if (openTabsInside(clipboard.path).length > 0) {
-        store.setStatus(`「${name}」已在页签中打开，请先关闭再移动。`);
-        return;
-      }
-      await moveEntry(clipboard.path, targetDir);
-      store.setFileClipboard(null);
-      store.setStatus(`已移动「${name}」`);
-    } else {
-      await copyEntry(clipboard.path, targetDir);
-      store.setStatus(`已粘贴「${name}」`);
+    await clipboardWriteFiles([path], mode === "cut");
+    store.setFileClipboard({ path, mode, system: true });
+    store.setStatus(`${verb}「${name}」，可粘贴到文件树、资源管理器或其他程序`);
+  } catch (error) {
+    // 系统剪贴板不可用（被别的程序占用，或不是 Windows）时退回应用内记录，至少能在本应用内粘贴。
+    store.setFileClipboard({ path, mode, system: false });
+    store.setStatus(`${verb}「${name}」，但系统剪贴板不可用，只能在本应用内粘贴：${errorText(error)}`);
+  }
+}
+
+/** 粘贴的来源：优先系统剪贴板里的文件（含资源管理器复制的），其次是系统剪贴板写入失败时的应用内记录。 */
+export interface PasteSource {
+  paths: string[];
+  cut: boolean;
+}
+
+export async function readPasteSource(): Promise<PasteSource | null> {
+  try {
+    const files = await clipboardReadFiles();
+    if (files.paths.length > 0) {
+      return { paths: files.paths, cut: files.cut };
     }
+  } catch {
+    // 读取失败按没有文件处理，再看应用内记录。
+  }
+  const fallback = useAppStore.getState().fileClipboard;
+  // 系统剪贴板写入成功的记录以系统剪贴板为准：它已经被别的内容（如一段文字）替换时，不能再粘贴旧的文件。
+  if (fallback && !fallback.system) {
+    return { paths: [fallback.path], cut: fallback.mode === "cut" };
+  }
+  return null;
+}
+
+/** 一次复制或移动的结果：成功搬家的条目（旧路径与新路径），以及失败原因。用户取消的不算失败。 */
+export interface TransferResult {
+  done: { from: string; to: string }[];
+  failed: string[];
+}
+
+/**
+ * 把一批条目复制或移动到 targetDir，逐项处理，一项失败不影响其他项。重名自动改名，不覆盖。
+ * 移动前先关闭受影响的页签，移动后把原来正在显示的文件在新位置重新打开。
+ */
+async function transferEntries(paths: string[], targetDir: string, mode: "copy" | "move"): Promise<TransferResult> {
+  const result: TransferResult = { done: [], failed: [] };
+  for (const source of paths) {
+    const name = fileName(source);
+    let reopen = "";
+    try {
+      if (mode === "move") {
+        const closed = await closeTabsInside(source);
+        if (!closed.ok) {
+          continue;
+        }
+        reopen = closed.activePath;
+      }
+      const target = mode === "move" ? await moveEntry(source, targetDir) : await copyEntry(source, targetDir);
+      result.done.push({ from: source, to: target });
+      if (mode === "move") {
+        forgetRelocated(source);
+        if (reopen) {
+          await openDocument(remapPath(reopen, source, target));
+        }
+      }
+    } catch (error) {
+      result.failed.push(`「${name}」：${errorText(error)}`);
+      if (reopen) {
+        await openDocument(reopen);
+      }
+    }
+  }
+  return result;
+}
+
+/** 执行复制或移动、刷新文件树，并在状态栏汇报结果。verb 是成功时的动词，如「已粘贴」「已移动」。 */
+export async function transferAndReport(paths: string[], targetDir: string, mode: "copy" | "move", verb: string): Promise<TransferResult> {
+  const store = useAppStore.getState();
+  const result = await transferEntries(paths, targetDir, mode);
+  if (result.done.length > 0) {
     await refreshTree();
+  }
+  const first = result.done[0];
+  const success = result.done.length === 1 && first ? `${verb}「${fileName(first.to)}」` : `${verb} ${result.done.length} 项`;
+  if (result.failed.length === 0) {
+    if (result.done.length > 0) {
+      store.setStatus(success);
+    }
+  } else if (result.done.length === 0) {
+    store.setStatus(result.failed.join("；"));
+  } else {
+    store.setStatus(`${success}；失败：${result.failed.join("；")}`);
+  }
+  return result;
+}
+
+/**
+ * 把剪贴板中的文件粘贴到 targetDir。来源可以是本应用复制的，也可以是资源管理器等其他程序复制或剪切的。
+ * 复制保留剪贴板，可重复粘贴；剪切成功后清空剪贴板，避免同一批文件被重复移动。
+ */
+export async function pasteEntry(targetDir: string): Promise<TransferResult | null> {
+  const store = useAppStore.getState();
+  const source = await readPasteSource();
+  if (!source) {
+    store.setStatus("剪贴板中没有文件，请先复制或剪切文件。");
+    return null;
+  }
+  const result = await transferAndReport(source.paths, targetDir, source.cut ? "move" : "copy", source.cut ? "已移动" : "已粘贴");
+  if (source.cut && result.done.length > 0) {
+    store.setFileClipboard(null);
+    try {
+      await clipboardClear();
+    } catch {
+      // 清不掉也不影响已完成的移动；再次粘贴时原路径已不存在，会提示失败。
+    }
+  }
+  return result;
+}
+
+/** 重命名文件或文件夹，成功返回新路径，失败（名称不合法、重名、用户取消）返回 null，原因显示在状态栏。 */
+export async function renamePath(path: string, newName: string): Promise<string | null> {
+  const store = useAppStore.getState();
+  const name = newName.trim();
+  if (!name || name === fileName(path)) {
+    return path;
+  }
+  const closed = await closeTabsInside(path);
+  if (!closed.ok) {
+    return null;
+  }
+  try {
+    const target = await renameEntry(path, name);
+    forgetRelocated(path);
+    if (closed.activePath) {
+      await openDocument(remapPath(closed.activePath, path, target));
+    }
+    store.setStatus(`已重命名为「${fileName(target)}」`);
+    await refreshTree();
+    return target;
   } catch (error) {
     store.setStatus(errorText(error));
+    if (closed.activePath) {
+      await openDocument(closed.activePath);
+    }
+    return null;
+  }
+}
+
+/** 在文件资源管理器中打开：文件夹直接打开，文件打开所在文件夹并选中它。 */
+export async function revealInExplorer(path: string): Promise<void> {
+  try {
+    await revealEntry(path);
+  } catch (error) {
+    useAppStore.getState().setStatus(errorText(error));
   }
 }
 
