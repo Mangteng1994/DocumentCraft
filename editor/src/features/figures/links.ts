@@ -27,6 +27,8 @@ export interface RoutedLink {
 export interface RouteMetrics {
   stub: number;
   lane: number;
+  /** 带折点的连线，最后一段（箭头头部所在的直线段）至少要有这么长，否则箭头头部压在拐角上。 */
+  tail: number;
 }
 
 type Segment = [Point, Point];
@@ -119,6 +121,11 @@ export function clearRoute(
       return false;
     }
     const edges = segments(points);
+    const lastEdge = edges[edges.length - 1];
+    const lastLength = Math.abs(lastEdge[0][0] - lastEdge[1][0]) + Math.abs(lastEdge[0][1] - lastEdge[1][1]);
+    if (edges.length > 1 && lastLength < metrics.tail) {
+      return false;
+    }
     const interiorTooShort = edges.slice(1, -1).some(([a, b]) => Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) < MIN_JOG);
     if (interiorTooShort) {
       return false;
@@ -243,6 +250,20 @@ function sharedCoordinate(source: Rect, target: Rect, horizontal: boolean): numb
   return Math.min(Math.max(center, clampedLow), clampedHigh);
 }
 
+/** 相对的两条边之间的空隙（CSS 像素），重叠或方向不符时为负数。 */
+function facingGap(source: Rect, target: Rect, fromSide: Side): number {
+  if (fromSide === "right") {
+    return target.left - source.right;
+  }
+  if (fromSide === "left") {
+    return source.left - target.right;
+  }
+  if (fromSide === "bottom") {
+    return target.top - source.bottom;
+  }
+  return source.top - target.bottom;
+}
+
 /** 计算一条连线的折线点。 */
 export function routeLink(link: LinkSpec, source: Rect, target: Rect, metrics: RouteMetrics): Point[] {
   const [autoFrom, autoTo] = autoSides(source, target);
@@ -251,8 +272,10 @@ export function routeLink(link: LinkSpec, source: Rect, target: Rect, metrics: R
   const facing = toSide === opposite(fromSide);
   const explicitPosition = link.fromAt !== undefined || link.toAt !== undefined;
 
-  // 相对的两条边且有重叠：直线。
-  if (facing && !explicitPosition) {
+  // 相对的两条边且有重叠：直线。两条边之间放不下一次折线时，即使指定了出入点位置也走直线：
+  // 为了对齐位置硬折一下，箭头头部只能压在拐角上，成为难以辨认的小钩。
+  const roomForJog = facingGap(source, target, fromSide) >= metrics.stub * 2;
+  if (facing && (!explicitPosition || !roomForJog)) {
     const horizontal = isHorizontal(fromSide);
     const shared = sharedCoordinate(source, target, horizontal);
     if (shared !== null) {
@@ -275,8 +298,8 @@ export function routeLink(link: LinkSpec, source: Rect, target: Rect, metrics: R
       if (forward > 0 && start[1] === end[1]) {
         return [start, end];
       }
-      if (forward > 0 && Math.abs(start[1] - end[1]) < MIN_JOG && !explicitPosition) {
-        // 两端高度只差几像素时，折一下看起来像绘制错误，改画成一条直线。
+      if (forward > 0 && Math.abs(start[1] - end[1]) < MIN_JOG) {
+        // 两端高度只差几像素时，折一下看起来像绘制错误，改画成一条直线（指定了出入点位置也一样）。
         const level = (start[1] + end[1]) / 2;
         return [[start[0], level], [end[0], level]];
       }
@@ -295,7 +318,7 @@ export function routeLink(link: LinkSpec, source: Rect, target: Rect, metrics: R
     if (forward > 0 && start[0] === end[0]) {
       return [start, end];
     }
-    if (forward > 0 && Math.abs(start[0] - end[0]) < MIN_JOG && !explicitPosition) {
+    if (forward > 0 && Math.abs(start[0] - end[0]) < MIN_JOG) {
       const level = (start[0] + end[0]) / 2;
       return [[level, start[1]], [level, end[1]]];
     }
