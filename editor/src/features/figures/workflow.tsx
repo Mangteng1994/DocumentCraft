@@ -2,7 +2,7 @@
 
 import { createRef } from "react";
 import { createRoot } from "react-dom/client";
-import { docflow, errorText } from "../../backend";
+import { docflow, errorText, newJobId } from "../../backend";
 import { FigureView, type FigureReport } from "./FigureView";
 import { figureToPng } from "./exportFigure";
 import type { FigureLayout, FigureSpec } from "./spec";
@@ -46,6 +46,8 @@ export interface FigureSession {
   figureModel: string;
   reviewModel: string;
   connection: { provider: string; endpoint: string };
+  /** 本次任务正在运行的 sidecar 任务 id，取消时逐个结束。 */
+  jobs: Set<string>;
 }
 
 interface FigureChange {
@@ -61,8 +63,20 @@ interface FigureRevision {
   reason?: string;
 }
 
-export function figureStage<T>(source: string, stage: string, input: object, apiKey?: string): Promise<T> {
-  return docflow<T>(["illustrate", "--source", source, "--stage", stage], { input, apiKey });
+/**
+ * 运行一次 sidecar 的 illustrate 阶段。传入 jobs 时登记任务 id，结束后移除，
+ * 这样后台任务取消时可以结束所有仍在运行的 sidecar 进程。
+ */
+export async function figureStage<T>(
+  source: string, stage: string, input: object, apiKey?: string, jobs?: Set<string>,
+): Promise<T> {
+  const job = newJobId("figure");
+  jobs?.add(job);
+  try {
+    return await docflow<T>(["illustrate", "--source", source, "--stage", stage], { input, apiKey, job });
+  } finally {
+    jobs?.delete(job);
+  }
 }
 
 export function refineFigure(
@@ -76,7 +90,7 @@ export function refineFigure(
     connection: session.connection,
     ...change,
   };
-  return figureStage(session.source, stage, payload, session.apiKey);
+  return figureStage(session.source, stage, payload, session.apiKey, session.jobs);
 }
 
 /** 挂载到布局树中测量并导出，预览使用同一张 PNG。 */
