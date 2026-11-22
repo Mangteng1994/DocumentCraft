@@ -2148,6 +2148,15 @@ textarea {
   user-select: none;
 }
 
+/* 虚拟标题编号（DC-072）：只是装饰，保留尾部空格作为与标题文字的间隔。 */
+.dc-heading-number {
+  white-space: pre;
+  color: var(--dc-color-ink-muted);
+  font-weight: var(--dc-font-weight-regular);
+  user-select: none;
+  pointer-events: none;
+}
+
 .dc-editor-host .dc-document h1::before { content: "H1"; }
 .dc-editor-host .dc-document h2::before { content: "H2"; }
 .dc-editor-host .dc-document h3::before { content: "H3"; }

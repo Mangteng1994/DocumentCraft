@@ -82,6 +82,8 @@ export interface Settings {
     margin: EditorMargin;
     lineHeight: EditorLineHeight;
     fontFamily: EditorFont;
+    /** 在 H1～H4 前显示虚拟编号 1、1.1、1.1.1、1.1.1.1（DC-072），不写入文件。 */
+    headingNumbers: boolean;
   };
   hotkeys: Hotkeys;
   /** 五彩文档大纲（DC-068）：开启后目录树按扩展名给文件的图标和名称着色。 */
@@ -179,7 +181,7 @@ function defaultHotkeys(): Hotkeys {
 export const DEFAULT_SETTINGS: Settings = {
   appearance: { theme: "system" },
   files: { showAllFiles: false, searchMode: "all", sortKey: "name", sortDescending: false },
-  editor: { fontSize: EDITOR_FONT_SIZE_DEFAULT, width: "standard", margin: "medium", lineHeight: "standard", fontFamily: "sans" },
+  editor: { fontSize: EDITOR_FONT_SIZE_DEFAULT, width: "standard", margin: "medium", lineHeight: "standard", fontFamily: "sans", headingNumbers: false },
   hotkeys: defaultHotkeys(),
   colorfulOutline: { enabled: false, rules: defaultFileColorRules() },
   copilot: {
@@ -291,6 +293,7 @@ export function normalizeSettings(saved: unknown): Settings {
   if (!EDITOR_FONTS.includes(editor.fontFamily)) {
     editor.fontFamily = DEFAULT_SETTINGS.editor.fontFamily;
   }
+  editor.headingNumbers = editor.headingNumbers === true;
   const sizeValid = Number.isFinite(editor.fontSize);
   const sizeClamped = Math.min(Math.max(Math.round(editor.fontSize), EDITOR_FONT_SIZE_MIN), EDITOR_FONT_SIZE_MAX);
   editor.fontSize = sizeValid ? sizeClamped : EDITOR_FONT_SIZE_DEFAULT;
