@@ -5,12 +5,12 @@ import json
 import sys
 from pathlib import Path
 
-from . import editor_api
+from . import editor_api, media_compress
 from .converter import convert
 from .templates import ConversionError
 
 # sidecar 子命令始终输出 JSON。md-to-word 为兼容既有脚本，仅在 --json 时输出 JSON。
-EDITOR_COMMANDS = {"notes", "share", "illustrate", "assistant", "ai", "chat"}
+EDITOR_COMMANDS = {"notes", "share", "illustrate", "assistant", "ai", "chat", "compress"}
 
 
 def _read_payload() -> dict:
@@ -66,6 +66,10 @@ def _build_parser() -> argparse.ArgumentParser:
 
     # 流式输出：每段回答一行 {"type": "delta"}，最后一行 {"type": "done"} 或错误对象。
     commands.add_parser("chat", help="Copilot 多轮对话，从标准输入读取对话 JSON")
+
+    # 流式输出：进度行 {"type": "start|file|progress|file_done"}，最后一行为汇总。选项从标准输入读取。
+    compress = commands.add_parser("compress", help="压缩 pptx、docx、xlsx 内嵌的视频与图片，分辨率不变")
+    compress.add_argument("--source", required=True, type=Path, help="源 Office 文档")
     return parser
 
 
@@ -73,6 +77,8 @@ def _run_editor_command(args: argparse.Namespace) -> dict:
     """执行阅读编辑器 sidecar 子命令。"""
     if args.command == "chat":
         return editor_api.chat_stream(_read_payload(), _print_json)
+    if args.command == "compress":
+        return media_compress.compress_office_media(args.source, _read_payload(), _print_json)
     if args.command == "notes":
         if args.action == "list":
             return editor_api.list_notes(args.source)

@@ -33,12 +33,13 @@ export interface SearchPreviewTarget {
   focusLocator: string;
 }
 
-/** 浮层：设置、插入表格、Quick Ask、文件属性。同一时刻只显示一个。 */
+/** 浮层：设置、插入表格、Quick Ask、文件属性、媒体压缩。同一时刻只显示一个。 */
 export type Overlay =
   | { kind: "settings"; tab: SettingsTab }
   | { kind: "properties"; path: string }
   | { kind: "insertTable" }
   | { kind: "quickAsk"; commandName?: string }
+  | { kind: "compress" }
   | null;
 
 export interface ContextMenuState {

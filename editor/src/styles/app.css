@@ -2981,3 +2981,47 @@ body.is-resizing {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+
+/* ---------- 压缩文档媒体（DC-073） ---------- */
+
+.dc-compress-progress,
+.dc-compress-result {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dc-space-sm);
+}
+
+.dc-progress {
+  height: var(--dc-size-progress);
+  border-radius: var(--dc-radius-sm);
+  background: var(--dc-color-surface-sunken);
+  overflow: hidden;
+}
+
+.dc-progress-bar {
+  height: 100%;
+  background: var(--dc-color-accent);
+  transition: width var(--dc-duration-fast) var(--dc-easing-standard);
+}
+
+.dc-compress-log {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dc-space-2xs);
+  max-height: var(--dc-size-log-max-height);
+  margin: 0;
+  padding: var(--dc-space-sm) var(--dc-space-md);
+  overflow: auto;
+  border: var(--dc-border);
+  border-radius: var(--dc-radius-md);
+  list-style: none;
+  font-size: var(--dc-font-size-sm);
+}
+
+.dc-compress-line {
+  word-break: break-all;
+}
+
+.dc-compress-line.is-kept {
+  color: var(--dc-color-ink-muted);
+}
