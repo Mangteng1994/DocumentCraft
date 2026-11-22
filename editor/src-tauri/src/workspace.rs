@@ -70,17 +70,6 @@ impl TreeNode {
     }
 }
 
-/// 取条目的最后修改时间（毫秒时间戳）；平台不支持或读取失败时返回 0，排序时按最旧处理。
-fn modified_millis(metadata: &fs::Metadata) -> u64 {
-    let Ok(modified) = metadata.modified() else {
-        return 0;
-    };
-    let Ok(elapsed) = modified.duration_since(std::time::UNIX_EPOCH) else {
-        return 0;
-    };
-    elapsed.as_millis() as u64
-}
-
 fn is_markdown(path: &Path) -> bool {
     let extension = path.extension().and_then(|value| value.to_str());
     match extension {
