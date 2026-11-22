@@ -73,6 +73,12 @@ export const figureTokens = {
   sideHeader: 54,
   /** 判断菱形的高度（pt）。 */
   decisionHeight: 30,
+  /**
+   * 判断框是标准菱形：points 为 0–100 视口内的顶点。文字只能放在菱形中部的内接矩形里，
+   * inset 为文字左右留白的百分比（文字宽度取一半），heightPerText 为菱形高度与文字高度的比值，
+   * 排版后按实测文字高度撑开，避免文字溢出菱形。
+   */
+  decision: { points: "50,0 100,50 50,100 0,50", inset: 25, heightPerText: 2.2 },
   /** 卡片图标尺寸（pt）。 */
   icon: 11,
   radius: { panel: 0, card: 0 },
@@ -86,6 +92,17 @@ export const figureTokens = {
   minCardWidth: 38,
   minFont: 8.5,
   maxWideAspect: 5.5,
+  /** 成图高宽比超过它时给出版面建议（不阻止出图），参考图的高宽比约 0.45–0.65。 */
+  maxTallAspect: 0.95,
+  /** 卡片内文字高度低于卡片高度这个比例，且卡片高于 minBlankHeight（pt）时，视为被拉成空盒。 */
+  minTextFill: 0.4,
+  minBlankHeight: 48,
+  /** 纵向顺序链超过这个数量，给出「竖向元素过多」建议。 */
+  maxStackedChain: 5,
+  /** 卡片被撑满后高度超过自然高度的这个倍数（4 倍，样张里刻意撑满的等高卡片在 3.6 倍以内），视为空盒，改为自然高度加均匀空隙。 */
+  maxStretch: 4,
+  /** 连线折线中间段短于这个长度（pt）呈现为小钩，走线时视为不可用。 */
+  minJog: 3,
   bold: 700,
   regular: 400,
   /**
@@ -101,6 +118,16 @@ export const figureTokens = {
     rose: { surface: "#f8eded", header: "#f3e7e8", card: "#efd3d9" },
     gray: { surface: "#f5f6f7", header: "#eceef0", card: "#e4e7ea" },
   },
+} as const;
+
+/**
+ * 黑白工程图：所有色调共用白底卡片、浅灰标题栏和近黑边框，不再靠灰度滤镜把彩色压成灰。
+ * 对应参考黑白样张：框体白底黑线，仅标题栏带一点灰。
+ */
+export const figureMonochrome = {
+  border: "#1a1a1a",
+  groupBorder: "#333333",
+  tone: { surface: "#ffffff", header: "#efefef", card: "#ffffff" },
 } as const;
 
 export type FigureTone = keyof typeof figureTokens.tones;

@@ -197,9 +197,35 @@ def stream_chat(settings: AISettings, system: str, messages: list[dict]) -> Iter
     raise ConversionError("请先选择 AI 连接方式。")
 
 
+def _load_json_object(response: str) -> object:
+    """解析模型返回的 JSON；整段解析失败时，取第一个「{」到最后一个「}」之间的部分再试一次。
+
+    模型有时在 JSON 前后附带说明文字。只在整段解析失败后才截取，不改变正常返回的处理。
+    """
+    try:
+        return json.loads(response)
+    except json.JSONDecodeError:
+        start = response.find("{")
+        end = response.rfind("}")
+        if start < 0 or end <= start:
+            raise
+        return json.loads(response[start:end + 1])
+
+
+def _invalid_json_message(response: object) -> str:
+    """说明无效 JSON 的特征，区分输出被截断、为空和带说明文字，方便判断是模型还是服务的问题。"""
+    if not isinstance(response, str) or not response.strip():
+        return "分析服务没有返回有效的 JSON（返回为空）。"
+    text = response.rstrip()
+    if not text.endswith(("}", "```")):
+        return f"分析服务没有返回有效的 JSON（共 {len(text)} 字符，末尾不完整，可能被截断）。"
+    return f"分析服务没有返回有效的 JSON（共 {len(text)} 字符）。"
+
+
 def request_json(settings: AISettings, instructions: str, payload: object, *, image: str | None = None) -> dict:
     """通过选定连接提交数据并解析模型返回的 JSON 对象。"""
     report = json.dumps(payload, ensure_ascii=False)
+    response: object = None
     try:
         if settings.provider == "chatgpt":
             content = report if image is None else [
@@ -221,9 +247,9 @@ def request_json(settings: AISettings, instructions: str, payload: object, *, im
             fenced = re.fullmatch(r"\s*```(?:json)?\s*([\s\S]+?)\s*```\s*", response, re.I)
             if fenced:
                 response = fenced.group(1)
-        result = json.loads(response)
+        result = _load_json_object(response)
     except (json.JSONDecodeError, TypeError) as error:
-        raise ConversionError("分析服务没有返回有效的 JSON。") from error
+        raise ConversionError(_invalid_json_message(response)) from error
     if not isinstance(result, dict):
         raise ConversionError("分析结果必须为 JSON 对象。")
     return result

@@ -588,6 +588,7 @@ def illustrate(
                     )
             except (ConversionError, OSError, TypeError, ValueError, KeyError, AttributeError) as error:
                 image.unlink(missing_ok=True)
+                image.with_suffix(".json").unlink(missing_ok=True)
                 reason = f"{stage}：{error}"
                 issues.append((f"候选图 {index}", reason))
                 candidate = diagram if isinstance(diagram, dict) else {}

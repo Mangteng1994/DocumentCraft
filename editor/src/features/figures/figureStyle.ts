@@ -7,7 +7,7 @@
  */
 
 import type { CSSProperties } from "react";
-import { figureTokens, type FigureTone } from "../../styles/tokens";
+import { figureMonochrome, figureTokens, type FigureTone } from "../../styles/tokens";
 
 type Variables = CSSProperties & Record<`--${string}`, string>;
 
@@ -16,7 +16,7 @@ function pt(value: number): string {
 }
 
 /** 根元素上的变量：字体、颜色、当前密度的字号与间距，以及线宽、圆角等。 */
-export function figureVariables(width: number, densityIndex: number): Variables {
+export function figureVariables(width: number, densityIndex: number, monochrome = false): Variables {
   const density = figureTokens.density[densityIndex];
   const gap = figureTokens.gap;
   const stroke = figureTokens.stroke;
@@ -27,8 +27,8 @@ export function figureVariables(width: number, densityIndex: number): Variables 
     "--f-ink": figureTokens.ink,
     "--f-muted": figureTokens.inkMuted,
     "--f-link": figureTokens.link,
-    "--f-border": figureTokens.border,
-    "--f-group-border": figureTokens.groupBorder,
+    "--f-border": monochrome ? figureMonochrome.border : figureTokens.border,
+    "--f-group-border": monochrome ? figureMonochrome.groupBorder : figureTokens.groupBorder,
     "--f-panel-title": pt(density.panelTitle),
     "--f-card-title": pt(density.cardTitle),
     "--f-detail": pt(density.detail),
@@ -53,15 +53,17 @@ export function figureVariables(width: number, densityIndex: number): Variables 
     "--f-stroke-panel": pt(stroke.panel),
     "--f-stroke-card": pt(stroke.card),
     "--f-stroke-group": pt(stroke.group),
+    "--f-stroke-link": pt(stroke.link),
+    "--f-decision-inset": `${figureTokens.decision.inset}%`,
   };
 }
 
 /** 色调变量，写在面板、卡片或判断上，子元素继承。 */
-export function toneVariables(tone: FigureTone | undefined): Variables {
+export function toneVariables(tone: FigureTone | undefined, monochrome = false): Variables {
   if (!tone) {
     return {};
   }
-  const colors = figureTokens.tones[tone];
+  const colors = monochrome ? figureMonochrome.tone : figureTokens.tones[tone];
   return {
     "--t-surface": colors.surface,
     "--t-header": colors.header,
@@ -71,6 +73,8 @@ export function toneVariables(tone: FigureTone | undefined): Variables {
 
 /** 根元素默认色调（灰），保证没有面板包裹的卡片也有颜色。 */
 export const defaultTone = toneVariables("gray");
+/** 黑白模式的根元素默认色调。 */
+export const monochromeTone = toneVariables("gray", true);
 
 export const figureCss = `
 .dcf { position: relative; box-sizing: border-box; padding: var(--f-gap-normal); background: var(--f-paper);
@@ -128,10 +132,13 @@ export const figureCss = `
   padding: var(--f-card-pad); border-top: var(--f-stroke-card) solid var(--f-border);
   font-size: var(--f-detail); color: var(--f-muted); }
 .dcf-tag + .dcf-tag::before { content: "|"; padding: 0 calc(var(--f-card-pad) * 1.2); color: var(--f-border); }
-.dcf-decision { position: relative; flex: none; min-height: var(--f-decision); display: flex; align-items: center;
+/* 标签一行放不下时改为逐行堆叠，避免分隔线落在行首（由 FigureView 排版后按实测折行设置）。 */
+.dcf-tags[data-stacked] { flex-direction: column; align-items: center; }
+.dcf-tags[data-stacked] .dcf-tag + .dcf-tag::before { content: none; }
+.dcf-decision { position: relative; flex: none; min-height: var(--f-decision); padding: var(--f-card-pad) 0; display: flex; align-items: center;
   justify-content: center; text-align: center; font-size: var(--f-card-title); }
 .dcf-decision > svg { position: absolute; left: 0; top: 0; width: 100%; height: 100%; overflow: visible; }
-.dcf-decision > span { position: relative; padding: 0 24%; }
+.dcf-decision > span { position: relative; padding: 0 var(--f-decision-inset); }
 .dcf-arrow { flex: none; display: flex; flex-direction: column; align-items: center; justify-content: center;
   gap: var(--f-gap-tight); color: var(--f-link); }
 .dcf-arrow > svg { flex: none; overflow: visible; }
@@ -146,5 +153,13 @@ export const figureCss = `
 .dcf-step.is-right.has-label { grid-template-rows: 1fr auto 1fr; }
 .dcf-step.is-right.has-label > svg { grid-area: 2 / 1; }
 .dcf-step.is-right .dcf-step-label { grid-area: 1 / 1; white-space: nowrap; padding-inline: var(--f-gap-tight); }
+/* 排版后由 FigureView 给被拉成空盒的 fill 容器加 data-spread：卡片保持自然高度，空隙均匀分配。 */
+.dcf-fillable[data-spread] { justify-content: space-evenly; }
+/* 卡片的 flex 值写在行内样式上（fill 容器均分高度），只有 !important 才能在 data-spread 时覆盖它。 */
+.dcf-fillable[data-spread] > .dcf-card { flex: 0 0 auto !important; }
+.dcf-step.is-down.is-stretch { flex: none; flex-direction: column; align-items: center; justify-content: flex-start; }
+.dcf-fillable[data-spread] > .dcf-step.is-stretch { flex: 1 1 auto; }
+.dcf-shaft { flex: 1 1 auto; width: var(--f-stroke-link); background: currentColor; color: var(--f-link); }
+.dcf-step.is-down.is-stretch > svg { flex: none; margin-top: calc(var(--f-stroke-link) * -1); color: var(--f-link); }
 .dcf-links { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
 `;

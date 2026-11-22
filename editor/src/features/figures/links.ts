@@ -6,6 +6,7 @@
  * 首选路径被阻挡时，沿实测元素边界寻找空白走廊，并避开已绘制的连线。
  */
 
+import { figureTokens } from "../../styles/tokens";
 import type { LinkSpec, Side } from "./spec";
 
 export interface Rect {
@@ -68,10 +69,17 @@ function crosses([a, b]: Segment, [c, d]: Segment): boolean {
   return meets && !sharedEndpoint;
 }
 
-/** 优先选无阻挡且无交叉的短折线，找不到时交给版式修订。 */
+/** 折线中间段短于这个长度（CSS 像素）会呈现为难以辨认的小钩，走线时视为不可用。 */
+const MIN_JOG = figureTokens.minJog * figureTokens.pxPerPt;
+
+/**
+ * 优先选无阻挡且无交叉的短折线，找不到时交给版式修订。
+ * directOnly 为真时只尝试首选折线，不绕行；用于先试「把端点提到所在面板边缘」这类更干净的画法。
+ * 连线不允许与已画出的连线交叉，也不允许穿过卡片；找不到这样的走法就返回 null，由调用方重新排列。
+ */
 export function clearRoute(
   link: LinkSpec, source: Rect, target: Rect, metrics: RouteMetrics, bounds: Rect,
-  obstacles: Rect[], previous: RoutedLink[], clearance: number,
+  obstacles: Rect[], previous: RoutedLink[], clearance: number, directOnly = false,
 ): Point[] | null {
   const earlier = previous.flatMap(({ points }) => segments(points));
   const blockers = [source, target, ...obstacles];
@@ -110,13 +118,24 @@ export function clearRoute(
     if (points.length < 2 || points.some(([x, y]) => x < bounds.left || x > bounds.right || y < bounds.top || y > bounds.bottom)) {
       return false;
     }
-    return segments(points).every((segment) =>
-      !blockers.some((rect) => segmentHits(segment, rect)) && !earlier.some((edge) => crosses(segment, edge)));
+    const edges = segments(points);
+    const interiorTooShort = edges.slice(1, -1).some(([a, b]) => Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) < MIN_JOG);
+    if (interiorTooShort) {
+      return false;
+    }
+    return edges.every((segment) => {
+      const blocked = blockers.some((rect) => segmentHits(segment, rect));
+      const crossing = earlier.some((edge) => crosses(segment, edge));
+      return !blocked && !crossing;
+    });
   }
 
   const direct = clean(preferred);
   if (usable(direct)) {
     return direct;
+  }
+  if (directOnly) {
+    return null;
   }
 
   function stub(point: Point, side: Side): Point {
@@ -256,6 +275,11 @@ export function routeLink(link: LinkSpec, source: Rect, target: Rect, metrics: R
       if (forward > 0 && start[1] === end[1]) {
         return [start, end];
       }
+      if (forward > 0 && Math.abs(start[1] - end[1]) < MIN_JOG && !explicitPosition) {
+        // 两端高度只差几像素时，折一下看起来像绘制错误，改画成一条直线。
+        const level = (start[1] + end[1]) / 2;
+        return [[start[0], level], [end[0], level]];
+      }
       if (forward >= metrics.stub * 2) {
         const middle = (start[0] + end[0]) / 2;
         return [start, [middle, start[1]], [middle, end[1]], end];
@@ -270,6 +294,10 @@ export function routeLink(link: LinkSpec, source: Rect, target: Rect, metrics: R
     const forward = fromSide === "bottom" ? end[1] - start[1] : start[1] - end[1];
     if (forward > 0 && start[0] === end[0]) {
       return [start, end];
+    }
+    if (forward > 0 && Math.abs(start[0] - end[0]) < MIN_JOG && !explicitPosition) {
+      const level = (start[0] + end[0]) / 2;
+      return [[level, start[1]], [level, end[1]]];
     }
     if (forward >= metrics.stub * 2) {
       const middle = (start[1] + end[1]) / 2;
