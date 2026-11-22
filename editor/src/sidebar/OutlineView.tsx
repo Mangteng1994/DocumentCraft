@@ -5,10 +5,11 @@
  */
 
 import { memo, useCallback, useDeferredValue, useMemo, useState } from "react";
-import { ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, Search, X } from "lucide-react";
+import { ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, ListOrdered, Search, X } from "lucide-react";
 import { buildHeadingTree, filterHeadingTree, type HeadingNode } from "@vmark/utils/markdownOutline";
 import { getEditor, revealPosition } from "../editor/editorHandle";
 import { useAppStore } from "../store";
+import { useSettings } from "../settings/settingsStore";
 import { iconSize } from "../styles/tokens";
 
 const OutlineItem = memo(function OutlineItem({
@@ -107,6 +108,8 @@ function collectCollapsible(nodes: HeadingNode[], result: Set<string>): Set<stri
 export function OutlineView() {
   const headings = useAppStore((state) => state.headings);
   const filePath = useAppStore((state) => state.filePath);
+  const headingNumbers = useSettings((state) => state.settings.editor.headingNumbers);
+  const updateEditor = useSettings((state) => state.update);
   const [query, setQuery] = useState("");
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
@@ -170,6 +173,16 @@ export function OutlineView() {
             <X size={iconSize.sm} />
           </button>
         )}
+        <button
+          type="button"
+          className={`dc-icon-button${headingNumbers ? " is-filled" : ""}`}
+          aria-label="标题编号"
+          aria-pressed={headingNumbers}
+          title={headingNumbers ? "隐藏标题编号" : "显示标题编号（1、1.1、1.1.1、1.1.1.1）"}
+          onClick={() => updateEditor("editor", { headingNumbers: !headingNumbers })}
+        >
+          <ListOrdered size={iconSize.sm} />
+        </button>
         <button type="button" className="dc-icon-button" aria-label="全部折叠" title="全部折叠" onClick={collapseAll}>
           <ChevronsDownUp size={iconSize.sm} />
         </button>
