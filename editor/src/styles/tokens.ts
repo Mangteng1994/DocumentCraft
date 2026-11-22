@@ -88,6 +88,10 @@ export const figureTokens = {
   /** 连线离开元素边缘后的最短直线段与 U 形回线的外扩距离（pt）。 */
   linkStub: 6,
   linkLane: 7,
+  /** 带折点的连线，最后一段的最短长度（pt），约为箭头头部长度的 1.3 倍。 */
+  linkTail: 5.5,
+  /** 有连线跨越其子块的纵向容器，子块之间的间距加宽到这一档，让箭头有地方画。 */
+  linkGap: "loose",
   linkClearance: 2,
   minCardWidth: 38,
   minFont: 8.5,

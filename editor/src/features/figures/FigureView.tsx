@@ -6,13 +6,13 @@
  */
 
 import {
-  createContext, useContext, useEffect, useLayoutEffect, useRef, useState,
+  createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState,
   type CSSProperties, type ReactNode, type RefObject,
 } from "react";
 import { figureTokens } from "../../styles/tokens";
 import { defaultTone, figureCss, figureVariables, monochromeTone, toneVariables } from "./figureStyle";
 import { figureIcons } from "./icons";
-import { clearRoute, labelAnchor, rectsOverlap, type Point, type Rect, type RoutedLink } from "./links";
+import { clearRoute, labelAnchor, rectsOverlap, type Point, type Rect, type RouteMetrics, type RoutedLink } from "./links";
 import type { ArrowBlock, Block, ChainBlock, Direction, FigureSpec, Gap, LinkSpec, RowBlock } from "./spec";
 
 export interface FigureReport {
@@ -108,6 +108,67 @@ function px(points: number): number {
 
 function gapClass(gap: Gap | undefined, fallback: Gap): string {
   return `dcf-gap-${gap ?? fallback}`;
+}
+
+/** 有连线跨越其子块的纵向容器。这些容器的子块之间要留出足够画箭头的间距。 */
+const WideGapContext = createContext<Set<Block>>(new Set());
+
+/** 每个有 ID 的组件从根到它自己的路径。 */
+function blockPaths(root: Block): Map<string, Block[]> {
+  const paths = new Map<string, Block[]>();
+  const visit = (block: Block, ancestors: Block[]) => {
+    const path = [...ancestors, block];
+    if (block.id) {
+      paths.set(block.id, path);
+    }
+    if ("children" in block) {
+      for (const child of block.children) {
+        visit(child, path);
+      }
+    }
+  };
+  visit(root, []);
+  return paths;
+}
+
+function isVerticalContainer(block: Block): boolean {
+  return block.kind === "column" || block.kind === "panel" || block.kind === "group";
+}
+
+/**
+ * 找出需要加宽间距的容器：连线两端分属某个纵向容器的不同子块时，该容器的子块之间就是箭头要穿过的空隙。
+ * 间距不够时箭头头部压在拐角上，走线算法再怎么调也画不好，所以先把空隙留出来。横向不处理：
+ * 宽度是 450pt 版心里最紧的约束，横向的层间箭头由 arrow 组件自带占位。
+ */
+function widenedContainers(spec: FigureSpec): Set<Block> {
+  const widened = new Set<Block>();
+  const paths = blockPaths(spec.root);
+  for (const link of spec.links ?? []) {
+    const from = paths.get(link.from);
+    const to = paths.get(link.to);
+    if (!from || !to) {
+      continue;
+    }
+    let shared = 0;
+    while (shared < from.length && shared < to.length && from[shared] === to[shared]) {
+      shared += 1;
+    }
+    const common = from[shared - 1];
+    const bothBelow = shared < from.length && shared < to.length;
+    if (common && bothBelow && isVerticalContainer(common)) {
+      widened.add(common);
+    }
+  }
+  return widened;
+}
+
+/** 容器的实际间距：被加宽的容器，间距低于 linkGap 这一档时提到这一档。 */
+function effectiveGap(block: Block, gap: Gap | undefined, widened: Set<Block>): Gap | undefined {
+  const narrow = gap === undefined || gap === "tight" || gap === "normal";
+  if (widened.has(block) && narrow) {
+    return figureTokens.linkGap;
+  }
+  return gap;
 }
 
 function flexStyle(flex: string | undefined): CSSProperties | undefined {
@@ -291,6 +352,7 @@ function Body({ children, gap, fill, className }: { children: Block[]; gap?: Gap
 
 function BlockView({ block, flex }: { block: Block; flex?: string }) {
   const monochrome = useContext(MonochromeContext);
+  const widened = useContext(WideGapContext);
   switch (block.kind) {
     case "row": {
       const weights = block.weights ?? inferredWeights(block);
@@ -324,7 +386,7 @@ function BlockView({ block, flex }: { block: Block; flex?: string }) {
     }
     case "column": {
       return (
-        <div className={`dcf-col ${gapClass(block.gap, "normal")}${spreadClass(block.children, block.fill)}`} data-fid={block.id} style={flexStyle(flex)}>
+        <div className={`dcf-col ${gapClass(effectiveGap(block, block.gap, widened), "normal")}${spreadClass(block.children, block.fill)}`} data-fid={block.id} style={flexStyle(flex)}>
           {block.children.map((child, index) => (
             <BlockView key={index} block={child} flex={fillFlex(child, block.fill)} />
           ))}
@@ -348,7 +410,7 @@ function BlockView({ block, flex }: { block: Block; flex?: string }) {
       const header = block.header ?? "band";
       const style = { ...toneVariables(block.tone, monochrome), ...flexStyle(flex) };
       const subtitle = block.subtitle ? <span className="dcf-subtitle">{block.subtitle}</span> : null;
-      const body = <Body className="dcf-body" gap={block.gap} fill={block.fill}>{block.children}</Body>;
+      const body = <Body className="dcf-body" gap={effectiveGap(block, block.gap, widened)} fill={block.fill}>{block.children}</Body>;
       if (header === "side") {
         return (
           <div className="dcf-panel is-side" data-fid={block.id} style={style}>
@@ -372,7 +434,7 @@ function BlockView({ block, flex }: { block: Block; flex?: string }) {
     }
     case "group": {
       return (
-        <div className={`dcf-group ${gapClass(block.gap, "normal")}${spreadClass(block.children, block.fill)}`} data-fid={block.id} style={flexStyle(flex)}>
+        <div className={`dcf-group ${gapClass(effectiveGap(block, block.gap, widened), "normal")}${spreadClass(block.children, block.fill)}`} data-fid={block.id} style={flexStyle(flex)}>
           {block.title ? (
             <div className="dcf-group-title">
               {block.title}
@@ -576,7 +638,7 @@ interface RoutingContext {
   endpoints: Map<string, HTMLElement>;
   shapes: HTMLElement[];
   origin: DOMRect;
-  metrics: { stub: number; lane: number };
+  metrics: RouteMetrics;
   bounds: Rect;
   clearance: number;
 }
@@ -733,6 +795,7 @@ export function FigureView({ spec, rootRef, maxHeight, monochrome, onReport }: F
   } | null>(null);
   const [fontsReady, setFontsReady] = useState(false);
   const width = spec.width ?? figureTokens.width;
+  const widened = useMemo(() => widenedContainers(spec), [spec]);
 
   useEffect(() => {
     setDensity(0);
@@ -772,7 +835,7 @@ export function FigureView({ spec, rootRef, maxHeight, monochrome, onReport }: F
     const shapes = Array.from(element.querySelectorAll<HTMLElement>(
       ".dcf-panel, .dcf-group, .dcf-card, .dcf-decision, .dcf-band, .dcf-side, .dcf-plain, .dcf-group-title, .dcf-step, .dcf-arrow",
     ));
-    const metrics = { stub: px(figureTokens.linkStub), lane: px(figureTokens.linkLane) };
+    const metrics = { stub: px(figureTokens.linkStub), lane: px(figureTokens.linkLane), tail: px(figureTokens.linkTail) };
     const clearance = px(figureTokens.linkClearance);
     const bounds = { left: clearance, top: clearance, right: origin.width - clearance, bottom: origin.height - clearance };
     const warnings = [...problems];
@@ -830,11 +893,13 @@ export function FigureView({ spec, rootRef, maxHeight, monochrome, onReport }: F
   const style = { ...figureVariables(width, density, monochrome), ...(monochrome ? monochromeTone : defaultTone) };
   return (
     <MonochromeContext.Provider value={Boolean(monochrome)}>
-      <div className="dcf" ref={root} style={style}>
-        <style>{figureCss}</style>
-        <BlockView block={spec.root} />
-        {layout && <LinkLayer routes={layout.routes} width={layout.width} height={layout.height} labelPt={figureTokens.density[density].label} />}
-      </div>
+      <WideGapContext.Provider value={widened}>
+        <div className="dcf" ref={root} style={style}>
+          <style>{figureCss}</style>
+          <BlockView block={spec.root} />
+          {layout && <LinkLayer routes={layout.routes} width={layout.width} height={layout.height} labelPt={figureTokens.density[density].label} />}
+        </div>
+      </WideGapContext.Provider>
     </MonochromeContext.Provider>
   );
 }
