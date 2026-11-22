@@ -149,8 +149,15 @@ def _fields(value: object, fields: dict, location: str) -> dict:
         raise ConversionError(f"{location}须为对象。")
     required = {key[:-1] for key in fields if key.endswith("*")}
     allowed = {key.rstrip("*") for key in fields}
-    if required.difference(value) or value.keys() - allowed:
-        raise ConversionError(f"{location}字段不符。必填 {sorted(required)}，可用 {sorted(allowed)}。")
+    missing = sorted(required.difference(value))
+    extra = sorted(value.keys() - allowed)
+    if missing or extra:
+        detail = []
+        if missing:
+            detail.append(f"缺少必填 {missing}")
+        if extra:
+            detail.append(f"多余 {extra}")
+        raise ConversionError(f"{location}字段不符：{'，'.join(detail)}。可用 {sorted(allowed)}。")
     return value
 
 
@@ -428,10 +435,12 @@ def write_approved_png(
 ) -> None:
     """重新核对已确认的规格和 PNG，并按实际印刷分辨率保存。"""
     entry = _fields(entry, {"spec*": "", "png*": ""}, "已确认配图")
-    validate_spec(entry["spec"], _evidence(diagram, blocks), diagram["title"], width)
+    spec = validate_spec(entry["spec"], _evidence(diagram, blocks), diagram["title"], width)
     data, dpi = _png_bytes(entry["png"], width, height)
     with Image.open(BytesIO(data), formats=["PNG"]) as image:
         image.save(output, format="PNG", dpi=(dpi, dpi))
+    # 规格与图片放在同一资源目录，之后可以原样重新排版或复现版面问题，不必从图片倒推。
+    output.with_suffix(".json").write_text(json.dumps(spec, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def commit_figures(source: Path, payload: dict) -> dict:

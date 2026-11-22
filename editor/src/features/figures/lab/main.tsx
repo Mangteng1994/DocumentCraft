@@ -56,7 +56,7 @@ function Lab() {
             <div className="figure-lab-head">{FIGURE_LAYOUTS[item.layout]} · {item.spec.title}</div>
             <div className={`figure-lab-report${warnings.length ? " is-warning" : ""}`}>
               {report
-                ? `${report.density} · ${report.widthPt.toFixed(0)}×${report.heightPt.toFixed(0)}pt · ${warnings.length ? warnings.join("；") : "放得下"}`
+                ? `${report.density} · ${report.widthPt.toFixed(0)}×${report.heightPt.toFixed(0)}pt · ${warnings.length ? warnings.join("；") : "放得下"}${report.advisories.length ? ` · 版面建议：${report.advisories.join("；")}` : ""}`
                 : "排版中…"}
             </div>
             <div className="figure-lab-frame">

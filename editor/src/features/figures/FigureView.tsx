@@ -5,18 +5,23 @@
  * 在报告里给出警告，由调用方决定换版式或精简内容。
  */
 
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from "react";
+import {
+  createContext, useContext, useEffect, useLayoutEffect, useRef, useState,
+  type CSSProperties, type ReactNode, type RefObject,
+} from "react";
 import { figureTokens } from "../../styles/tokens";
-import { defaultTone, figureCss, figureVariables, toneVariables } from "./figureStyle";
+import { defaultTone, figureCss, figureVariables, monochromeTone, toneVariables } from "./figureStyle";
 import { figureIcons } from "./icons";
 import { clearRoute, labelAnchor, rectsOverlap, type Point, type Rect, type RoutedLink } from "./links";
-import type { ArrowBlock, Block, ChainBlock, Direction, FigureSpec, Gap } from "./spec";
+import type { ArrowBlock, Block, ChainBlock, Direction, FigureSpec, Gap, LinkSpec, RowBlock } from "./spec";
 
 export interface FigureReport {
   /** 实际使用的密度档名称。 */
   density: string;
   fits: boolean;
   warnings: string[];
+  /** 不阻止出图的版面建议（如图过高、竖向元素过多），调用方可据此重排一次。 */
+  advisories: string[];
   /** 成图尺寸（pt）。 */
   widthPt: number;
   heightPt: number;
@@ -31,9 +36,71 @@ interface FigureViewProps {
   onReport?: (report: FigureReport) => void;
 }
 
+/** 黑白模式：色调与边框改用 tokens 里的黑白调色盘。 */
+const MonochromeContext = createContext(false);
+
+function isLeaf(block: Block): boolean {
+  return block.kind === "card" || block.kind === "decision";
+}
+
+/** fill 容器里的子元素均分高度。被拉成空盒的情况由 relaxStretchedCards 排版后检出并改为自然高度。 */
+function fillFlex(child: Block, fill: boolean | undefined): string | undefined {
+  if (!fill || child.kind === "arrow") {
+    return undefined;
+  }
+  return "1 1 0";
+}
+
+/**
+ * 一个组件横向并排的最大列数：行累加各子项，网格取列数，面板、分组、纵向容器取子项中最宽的一个。
+ * 用来在没有 weights 时按内容给并列的面板分配宽度。
+ */
+function acrossCount(block: Block): number {
+  if (block.kind === "card" || block.kind === "decision" || block.kind === "arrow") {
+    return 1;
+  }
+  if (block.kind === "grid") {
+    return block.columns;
+  }
+  const widths = block.children.map(acrossCount);
+  const sideBySide = block.kind === "row" || (block.kind === "chain" && block.direction === "right");
+  if (sideBySide) {
+    const children = block.children.filter((child) => child.kind !== "arrow");
+    return children.reduce((total, child) => total + acrossCount(child), 0);
+  }
+  return Math.max(1, ...widths);
+}
+
+/**
+ * 行没有 weights 时的宽度比例：只在子项是面板或分组且各自内部列数不同时才推断，
+ * 否则返回 undefined 保持等分。规格自带 weights 时始终以规格为准。
+ */
+function inferredWeights(block: RowBlock): number[] | undefined {
+  const children = block.children.filter((child) => child.kind !== "arrow");
+  const containers = children.every((child) => child.kind === "panel" || child.kind === "group");
+  if (!containers) {
+    return undefined;
+  }
+  const counts = children.map(acrossCount);
+  const uniform = counts.every((count) => count === counts[0]);
+  if (uniform) {
+    return undefined;
+  }
+  return counts;
+}
+
+/** 带卡片子元素的 fill 容器，排版后可能被标成 data-spread。 */
+function spreadClass(children: Block[], fill: boolean | undefined): string {
+  if (fill && children.some(isLeaf)) {
+    return " dcf-fillable";
+  }
+  return "";
+}
+
 /** 标题、说明折行超过这些行数视为挤不下。 */
 const MAX_TITLE_LINES = 3;
 const MAX_DETAIL_LINES = 4;
+const MAX_DECISION_LINES = 3;
 
 function px(points: number): number {
   return points * figureTokens.pxPerPt;
@@ -158,8 +225,27 @@ function ArrowView({ block }: { block: ArrowBlock }) {
 }
 
 /** 顺序链里两张卡片之间的小箭头。 */
-function ChainStep({ direction, label }: { direction: "down" | "right"; label: string | null | undefined }) {
+function ChainStep(
+  { direction, label, stretch }: { direction: "down" | "right"; label: string | null | undefined; stretch?: boolean },
+) {
   const length = px(figureTokens.chainArrow);
+  if (stretch && direction === "down" && !label) {
+    // 撑满的纵向链：箭头杆随空隙拉长，箭头尖端始终贴着下一张卡片。
+    const headWidth = px(figureTokens.arrowHead.width);
+    const headLength = px(figureTokens.arrowHead.length);
+    const tip: Point = [headWidth / 2, headLength];
+    const from: Point = [headWidth / 2, 0];
+    const head = arrowHead(tip, from);
+    const viewBox = `0 0 ${headWidth} ${headLength}`;
+    return (
+      <div className="dcf-step is-down is-stretch" style={{ minHeight: length }}>
+        <div className="dcf-shaft" />
+        <svg width={headWidth} height={headLength} viewBox={viewBox}>
+          <polygon points={pointList(head)} fill="currentColor" />
+        </svg>
+      </div>
+    );
+  }
   const slot = label ? px(figureTokens.chainLabelSlot) : length;
   const size: CSSProperties = direction === "down" ? { minHeight: slot } : { minWidth: slot };
   return (
@@ -172,15 +258,19 @@ function ChainStep({ direction, label }: { direction: "down" | "right"; label: s
 
 function ChainView({ block, flex }: { block: ChainBlock; flex?: string }) {
   const items: ReactNode[] = [];
-  const childFlex = block.direction === "right" || block.fill ? "1 1 0" : undefined;
+  const stretchSteps = block.direction === "down" && Boolean(block.fill) && block.children.every(isLeaf);
   block.children.forEach((child, index) => {
     if (index > 0) {
       const label = block.labels?.[index - 1];
-      items.push(<ChainStep key={`step-${index}`} direction={block.direction} label={label} />);
+      items.push(<ChainStep key={`step-${index}`} direction={block.direction} label={label} stretch={stretchSteps} />);
     }
+    const childFlex: string | undefined = block.direction === "right" ? "1 1 0" : fillFlex(child, block.fill);
     items.push(<BlockView key={`item-${index}`} block={child} flex={childFlex} />);
   });
-  const className = block.direction === "down" ? "dcf-col" : "dcf-row is-center";
+  let className = block.direction === "down" ? "dcf-col" : "dcf-row is-center";
+  if (stretchSteps) {
+    className += " dcf-fillable";
+  }
   return (
     <div className={className} data-fid={block.id} style={flexStyle(flex)}>
       {items}
@@ -190,19 +280,20 @@ function ChainView({ block, flex }: { block: ChainBlock; flex?: string }) {
 
 /** 面板、分组里的内容区：纵向排列，fill 时子元素均分高度。 */
 function Body({ children, gap, fill, className }: { children: Block[]; gap?: Gap; fill?: boolean; className: string }) {
-  const childFlex = fill ? "1 1 0" : undefined;
   return (
-    <div className={`${className} ${gapClass(gap, "normal")}`}>
+    <div className={`${className} ${gapClass(gap, "normal")}${spreadClass(children, fill)}`}>
       {children.map((child, index) => (
-        <BlockView key={index} block={child} flex={child.kind === "arrow" ? undefined : childFlex} />
+        <BlockView key={index} block={child} flex={fillFlex(child, fill)} />
       ))}
     </div>
   );
 }
 
 function BlockView({ block, flex }: { block: Block; flex?: string }) {
+  const monochrome = useContext(MonochromeContext);
   switch (block.kind) {
     case "row": {
+      const weights = block.weights ?? inferredWeights(block);
       let weightIndex = 0;
       const classes = ["dcf-row", gapClass(block.gap, "normal")];
       const style: CSSProperties = { ...flexStyle(flex) };
@@ -215,7 +306,7 @@ function BlockView({ block, flex }: { block: Block; flex?: string }) {
         // 阶段共用标题行，最长标题换行时仍能对齐各栏的内容起点。
         classes.push("has-stage-bands");
         style.gridTemplateColumns = block.children.map((_, index) =>
-          `minmax(0, ${block.weights?.[index] ?? 1}fr)`,
+          `minmax(0, ${weights?.[index] ?? 1}fr)`,
         ).join(" ");
       }
       return (
@@ -224,7 +315,7 @@ function BlockView({ block, flex }: { block: Block; flex?: string }) {
             if (child.kind === "arrow") {
               return <BlockView key={index} block={child} />;
             }
-            const weight = block.weights?.[weightIndex] ?? 1;
+            const weight = weights?.[weightIndex] ?? 1;
             weightIndex += 1;
             return <BlockView key={index} block={child} flex={`${weight} 1 0`} />;
           })}
@@ -232,11 +323,10 @@ function BlockView({ block, flex }: { block: Block; flex?: string }) {
       );
     }
     case "column": {
-      const childFlex = block.fill ? "1 1 0" : undefined;
       return (
-        <div className={`dcf-col ${gapClass(block.gap, "normal")}`} data-fid={block.id} style={flexStyle(flex)}>
+        <div className={`dcf-col ${gapClass(block.gap, "normal")}${spreadClass(block.children, block.fill)}`} data-fid={block.id} style={flexStyle(flex)}>
           {block.children.map((child, index) => (
-            <BlockView key={index} block={child} flex={child.kind === "arrow" ? undefined : childFlex} />
+            <BlockView key={index} block={child} flex={fillFlex(child, block.fill)} />
           ))}
         </div>
       );
@@ -256,7 +346,7 @@ function BlockView({ block, flex }: { block: Block; flex?: string }) {
       return <ChainView block={block} flex={flex} />;
     case "panel": {
       const header = block.header ?? "band";
-      const style = { ...toneVariables(block.tone), ...flexStyle(flex) };
+      const style = { ...toneVariables(block.tone, monochrome), ...flexStyle(flex) };
       const subtitle = block.subtitle ? <span className="dcf-subtitle">{block.subtitle}</span> : null;
       const body = <Body className="dcf-body" gap={block.gap} fill={block.fill}>{block.children}</Body>;
       if (header === "side") {
@@ -281,9 +371,8 @@ function BlockView({ block, flex }: { block: Block; flex?: string }) {
       );
     }
     case "group": {
-      const childFlex = block.fill ? "1 1 0" : undefined;
       return (
-        <div className={`dcf-group ${gapClass(block.gap, "normal")}`} data-fid={block.id} style={flexStyle(flex)}>
+        <div className={`dcf-group ${gapClass(block.gap, "normal")}${spreadClass(block.children, block.fill)}`} data-fid={block.id} style={flexStyle(flex)}>
           {block.title ? (
             <div className="dcf-group-title">
               {block.title}
@@ -291,7 +380,7 @@ function BlockView({ block, flex }: { block: Block; flex?: string }) {
             </div>
           ) : null}
           {block.children.map((child, index) => (
-            <BlockView key={index} block={child} flex={child.kind === "arrow" ? undefined : childFlex} />
+            <BlockView key={index} block={child} flex={fillFlex(child, block.fill)} />
           ))}
         </div>
       );
@@ -307,7 +396,7 @@ function BlockView({ block, flex }: { block: Block; flex?: string }) {
       if (block.tags?.length) {
         classes.push("has-tags");
       }
-      const style = { ...toneVariables(block.tone), ...flexStyle(flex) };
+      const style = { ...toneVariables(block.tone, monochrome), ...flexStyle(flex) };
       const text = (
         <>
           <div className="dcf-title">{block.title}</div>
@@ -327,12 +416,12 @@ function BlockView({ block, flex }: { block: Block; flex?: string }) {
       );
     }
     case "decision": {
-      const style = { ...toneVariables(block.tone), ...flexStyle(flex) };
+      const style = { ...toneVariables(block.tone, monochrome), ...flexStyle(flex) };
       const stroke = px(figureTokens.stroke.card);
       return (
         <div className="dcf-decision" data-fid={block.id} style={style}>
           <svg viewBox="0 0 100 100" preserveAspectRatio="none">
-            <polygon points="50,0 100,50 50,100 0,50" style={{ fill: "var(--t-surface)", stroke: "var(--f-border)" }}
+            <polygon points={figureTokens.decision.points} style={{ fill: "var(--t-surface)", stroke: "var(--f-border)" }}
               strokeWidth={stroke} vectorEffect="non-scaling-stroke" />
           </svg>
           <span>{block.text}</span>
@@ -342,6 +431,17 @@ function BlockView({ block, flex }: { block: Block; flex?: string }) {
     case "arrow":
       return <ArrowView block={block} />;
   }
+}
+
+/** 包住 element、但不包住 other 的最外层面板或分组，没有时返回 element 本身。 */
+function outermostContainer(element: HTMLElement, other: HTMLElement): HTMLElement {
+  let best = element;
+  let current = element.parentElement?.closest<HTMLElement>(".dcf-panel, .dcf-group") ?? null;
+  while (current && !current.contains(other)) {
+    best = current;
+    current = current.parentElement?.closest<HTMLElement>(".dcf-panel, .dcf-group") ?? null;
+  }
+  return best;
 }
 
 function relativeRect(element: Element, origin: DOMRect): Rect {
@@ -361,6 +461,214 @@ function lineCount(element: HTMLElement): number {
     return 1;
   }
   return Math.round(element.getBoundingClientRect().height / lineHeight);
+}
+
+/** 菱形只有中部能放字，按实测文字高度撑开判断框。每次排版前先清掉上一次的高度。 */
+function fitDecisions(root: HTMLElement): void {
+  for (const decision of root.querySelectorAll<HTMLElement>(".dcf-decision")) {
+    decision.style.minHeight = "";
+    const text = decision.querySelector<HTMLElement>(":scope > span");
+    if (!text) {
+      continue;
+    }
+    const wanted = text.offsetHeight * figureTokens.decision.heightPerText;
+    decision.style.minHeight = `${wanted}px`;
+  }
+}
+
+/** 卡片内容的自然高度：图标行取最高的一项，纵向排列取各项之和，再加上下内边距。 */
+function naturalCardHeight(card: HTMLElement): number {
+  const style = getComputedStyle(card);
+  const padding = parseFloat(style.paddingTop) + parseFloat(style.paddingBottom);
+  const heights = Array.from(card.children, (child) => (child as HTMLElement).offsetHeight);
+  const rowLayout = style.flexDirection === "row";
+  let content = heights.reduce((total, height) => total + height, 0);
+  if (rowLayout) {
+    content = Math.max(0, ...heights);
+  }
+  return content + padding;
+}
+
+/** 卡片是否被撑满成空盒：高度够高，且超过自然高度的 maxStretch 倍。 */
+function isStretchedCard(card: HTMLElement): boolean {
+  const heightPt = card.offsetHeight / figureTokens.pxPerPt;
+  if (heightPt < figureTokens.minBlankHeight) {
+    return false;
+  }
+  const naturalHeight = naturalCardHeight(card);
+  return card.offsetHeight > naturalHeight * figureTokens.maxStretch;
+}
+
+/**
+ * 同栏内容少、邻栏内容多时，撑满等高会把卡片拉成大空盒。某张卡片高度超过自然高度的 maxStretch 倍时，
+ * 该容器改为卡片保持自然高度、空隙均匀分配（样式见 data-spread）。其余情况保持等高。
+ * 属性写在 DOM 上，每次排版前先清掉。
+ */
+function relaxStretchedCards(root: HTMLElement): void {
+  for (const container of root.querySelectorAll<HTMLElement>(".dcf-fillable")) {
+    container.removeAttribute("data-spread");
+  }
+  for (const container of root.querySelectorAll<HTMLElement>(".dcf-fillable")) {
+    const children = Array.from(container.children) as HTMLElement[];
+    const cards = children.filter((child) => child.classList.contains("dcf-card"));
+    if (cards.some(isStretchedCard)) {
+      container.setAttribute("data-spread", "");
+    }
+  }
+}
+
+/**
+ * 标签一行放不下时改成逐行堆叠。折行后分隔线会落在行首，所以按实测的行位置判断。
+ * 属性写在 DOM 上而不是 React 状态里，每次排版前先清掉，换密度后重新判断。
+ */
+function stackWrappedTags(root: HTMLElement): void {
+  for (const tags of root.querySelectorAll<HTMLElement>(".dcf-tags")) {
+    tags.removeAttribute("data-stacked");
+    const tops = new Set(Array.from(tags.children, (tag) => Math.round((tag as HTMLElement).offsetTop)));
+    if (tops.size > 1) {
+      tags.setAttribute("data-stacked", "");
+    }
+  }
+}
+
+/**
+ * 版面建议：不影响能否出图，但说明图形比例或元素分布不理想。
+ * 调用方可以带着这些建议重排一次，重排失败时仍保留原图。
+ */
+function layoutAdvice(root: HTMLElement): string[] {
+  const advice: string[] = [];
+  for (const container of root.querySelectorAll(".dcf-fillable[data-spread]")) {
+    advice.push(`「${container.textContent?.slice(0, 12)}」所在栏内容明显少于邻栏，请与同栏条目合并或平衡各栏条目数`);
+  }
+  for (const decision of root.querySelectorAll<HTMLElement>(".dcf-decision > span")) {
+    const lines = lineCount(decision);
+    if (lines > MAX_DECISION_LINES) {
+      advice.push(`判断「${decision.textContent}」折成 ${lines} 行，菱形被撑得又高又窄，请缩短判断文字`);
+    }
+  }
+  const width = root.offsetWidth;
+  const height = root.offsetHeight;
+  if (width > 0 && height / width > figureTokens.maxTallAspect) {
+    const ratio = (height / width).toFixed(2);
+    advice.push(`图形偏高（高宽比 ${ratio}，参考图约 0.45–0.65）。请改成多栏并排或 2×N 网格，把长流程分到相邻栏`);
+  }
+  for (const column of root.querySelectorAll<HTMLElement>(".dcf-col")) {
+    const stacked = Array.from(column.children).filter((child) => child.classList.contains("dcf-card")).length;
+    if (stacked > figureTokens.maxStackedChain) {
+      advice.push(`同一栏纵向叠了 ${stacked} 个卡片，请拆成两栏或合并相近条目`);
+    }
+  }
+  for (const card of root.querySelectorAll<HTMLElement>(".dcf-card")) {
+    const cardHeight = card.offsetHeight;
+    const text = card.querySelector<HTMLElement>(".dcf-card-text");
+    if (!text || cardHeight / figureTokens.pxPerPt < figureTokens.minBlankHeight) {
+      continue;
+    }
+    if (text.offsetHeight / cardHeight < figureTokens.minTextFill) {
+      advice.push(`卡片「${card.textContent?.slice(0, 12)}」留白过大，请与同栏条目合并或改用等分网格`);
+    }
+  }
+  return [...new Set(advice)];
+}
+
+/** 连线走线需要的排版测量结果。 */
+interface RoutingContext {
+  endpoints: Map<string, HTMLElement>;
+  shapes: HTMLElement[];
+  origin: DOMRect;
+  metrics: { stub: number; lane: number };
+  bounds: Rect;
+  clearance: number;
+}
+
+interface RoutingResult {
+  routed: RoutedLink[];
+  failed: LinkSpec[];
+  /** 放开指定出入边后才走通的连线。 */
+  relaxed: LinkSpec[];
+}
+
+/** 为一条连线找走法：原端点直走，其次提到所在面板边缘，最后沿空白走廊绕行。 */
+function routeOneLink(link: LinkSpec, context: RoutingContext, routed: RoutedLink[]): Point[] | null {
+  const { endpoints, shapes, origin, metrics, bounds, clearance } = context;
+  const source = endpoints.get(link.from) as HTMLElement;
+  const target = endpoints.get(link.to) as HTMLElement;
+  const route = (from: HTMLElement, to: HTMLElement, directOnly: boolean) => {
+    const obstacles = shapes.filter((item) => ![from, to].some((end) => item.contains(end) || end.contains(item)));
+    const obstacleRects = obstacles.map((item) => relativeRect(item, origin));
+    return clearRoute(
+      link, relativeRect(from, origin), relativeRect(to, origin), metrics, bounds,
+      obstacleRects, routed, clearance, directOnly,
+    );
+  };
+  // 端点藏在面板深处时，直线常被面板标题栏挡住而绕出画布边缘。先试把端点提到所在面板的边缘，
+  // 参考图里跨区箭头也是落在分区边界上；都不通再回到原端点绕行。
+  const liftedSource = outermostContainer(source, target);
+  const liftedTarget = outermostContainer(target, source);
+  const variants: [HTMLElement, HTMLElement][] = [[source, target]];
+  // 指定了出入点位置（fromAt、toAt）的连线，位置比例针对原元素，提到更大的面板后含义会变，不提升。
+  const explicitPosition = link.fromAt !== undefined || link.toAt !== undefined;
+  if (!explicitPosition && liftedTarget !== target) {
+    variants.push([source, liftedTarget]);
+  }
+  if (!explicitPosition && liftedSource !== source) {
+    variants.push([liftedSource, target]);
+  }
+  if (!explicitPosition && liftedSource !== source && liftedTarget !== target) {
+    variants.push([liftedSource, liftedTarget]);
+  }
+  for (const [from, to] of variants) {
+    const direct = route(from, to, true);
+    if (direct) {
+      return direct;
+    }
+  }
+  return route(source, target, false);
+}
+
+/** 按给定次序逐条走线。后走的连线必须避开先走的，所以次序会决定谁走不通。 */
+function routeInOrder(links: LinkSpec[], context: RoutingContext): RoutingResult {
+  const result: RoutingResult = { routed: [], failed: [], relaxed: [] };
+  for (const link of links) {
+    let points = routeOneLink(link, context, result.routed);
+    if (!points && (link.fromSide || link.toSide)) {
+      // 指定的出入边走不通时，放开边的限制再试，方向仍是 from 到 to。
+      const loose: LinkSpec = { ...link, fromSide: undefined, toSide: undefined };
+      points = routeOneLink(loose, context, result.routed);
+      if (points) {
+        result.relaxed.push(link);
+      }
+    }
+    if (points) {
+      result.routed.push({ link, points });
+    } else {
+      result.failed.push(link);
+    }
+  }
+  return result;
+}
+
+/**
+ * 连线不交叉、不穿卡片。规格次序走不通时，换次序重走：先走失败的，再走反序，取失败最少的一次。
+ * 仍有失败的连线交给调用方，由它带着失败信息让模型重新排列。
+ */
+function routeAllLinks(links: LinkSpec[], context: RoutingContext): RoutingResult {
+  let best = routeInOrder(links, context);
+  if (best.failed.length === 0) {
+    return best;
+  }
+  const failedFirst = [...best.failed, ...links.filter((link) => !best.failed.includes(link))];
+  const reversed = [...links].reverse();
+  for (const order of [failedFirst, reversed]) {
+    const attempt = routeInOrder(order, context);
+    if (attempt.failed.length < best.failed.length) {
+      best = attempt;
+    }
+    if (best.failed.length === 0) {
+      break;
+    }
+  }
+  return best;
 }
 
 /** 检查排版是否放得下，返回问题列表。 */
@@ -420,7 +728,9 @@ export function FigureView({ spec, rootRef, maxHeight, monochrome, onReport }: F
   const ownRef = useRef<HTMLDivElement | null>(null);
   const root = rootRef ?? ownRef;
   const [density, setDensity] = useState(0);
-  const [layout, setLayout] = useState<{ routes: RoutedLink[]; width: number; height: number; warnings: string[] } | null>(null);
+  const [layout, setLayout] = useState<{
+    routes: RoutedLink[]; width: number; height: number; warnings: string[]; advisories: string[];
+  } | null>(null);
   const [fontsReady, setFontsReady] = useState(false);
   const width = spec.width ?? figureTokens.width;
 
@@ -445,6 +755,9 @@ export function FigureView({ spec, rootRef, maxHeight, monochrome, onReport }: F
     if (!element || !fontsReady) {
       return;
     }
+    relaxStretchedCards(element);
+    fitDecisions(element);
+    stackWrappedTags(element);
     const problems = fitProblems(element, maxHeight);
     const lastDensity = figureTokens.density.length - 1;
     if (problems.length > 0 && density < lastDensity) {
@@ -462,27 +775,26 @@ export function FigureView({ spec, rootRef, maxHeight, monochrome, onReport }: F
     const metrics = { stub: px(figureTokens.linkStub), lane: px(figureTokens.linkLane) };
     const clearance = px(figureTokens.linkClearance);
     const bounds = { left: clearance, top: clearance, right: origin.width - clearance, bottom: origin.height - clearance };
-    const routed: RoutedLink[] = [];
     const warnings = [...problems];
-    for (const link of spec.links ?? []) {
-      const source = endpoints.get(link.from);
-      const target = endpoints.get(link.to);
-      if (!source || !target) {
+    const links = (spec.links ?? []).filter((link) => {
+      const present = endpoints.has(link.from) && endpoints.has(link.to);
+      if (!present) {
         warnings.push(`连线 ${link.from} → ${link.to} 的端点不存在`);
-        continue;
       }
-      const obstacles = shapes.filter((item) => ![source, target].some((end) => item.contains(end) || end.contains(item)));
-      const points = clearRoute(
-        link, relativeRect(source, origin), relativeRect(target, origin), metrics, bounds,
-        obstacles.map((item) => relativeRect(item, origin)), routed, clearance,
-      );
-      if (points) {
-        routed.push({ link, points });
-      } else {
-        warnings.push(`连线 ${link.from} → ${link.to} 缺少可避开其他元素的走线空间`);
-      }
+      return present;
+    });
+    const context: RoutingContext = { endpoints, shapes, origin, metrics, bounds, clearance };
+    const result = routeAllLinks(links, context);
+    const routed = result.routed;
+    for (const link of result.failed) {
+      // 连线不得交叉或穿过卡片。几种走法和次序都试过仍找不到走线空间，属于排版失败，由调用方重新排列。
+      warnings.push(`连线 ${link.from} → ${link.to} 缺少可避开其他元素的走线空间`);
     }
-    setLayout({ routes: routed, width: element.offsetWidth, height: element.offsetHeight, warnings });
+    const advisories = result.relaxed.map((link) => `连线 ${link.from} → ${link.to} 未按指定的边出入`);
+    setLayout({
+      routes: routed, width: element.offsetWidth, height: element.offsetHeight, warnings,
+      advisories: [...advisories, ...layoutAdvice(element)],
+    });
   }, [spec, density, fontsReady, root, maxHeight]);
 
   useLayoutEffect(() => {
@@ -494,6 +806,7 @@ export function FigureView({ spec, rootRef, maxHeight, monochrome, onReport }: F
     const shapes = element.querySelectorAll(".dcf-card, .dcf-decision, .dcf-band, .dcf-side, .dcf-plain, .dcf-group-title");
     const occupied = Array.from(shapes, (item) => relativeRect(item, origin));
     const warnings = [...layout.warnings];
+    const advisories = [...layout.advisories];
     for (const label of element.querySelectorAll(".dcf-links text")) {
       const box = relativeRect(label, origin);
       if (occupied.some((other) => rectsOverlap(box, other)) || box.left < 0 || box.top < 0
@@ -506,6 +819,7 @@ export function FigureView({ spec, rootRef, maxHeight, monochrome, onReport }: F
       density: figureTokens.density[density].name,
       fits: warnings.length === 0,
       warnings,
+      advisories,
       widthPt: layout.width / figureTokens.pxPerPt,
       heightPt: layout.height / figureTokens.pxPerPt,
     });
@@ -513,13 +827,15 @@ export function FigureView({ spec, rootRef, maxHeight, monochrome, onReport }: F
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [layout, root]);
 
-  const style = { ...figureVariables(width, density), ...defaultTone, filter: monochrome ? "grayscale(1)" : undefined };
+  const style = { ...figureVariables(width, density, monochrome), ...(monochrome ? monochromeTone : defaultTone) };
   return (
-    <div className="dcf" ref={root} style={style}>
-      <style>{figureCss}</style>
-      <BlockView block={spec.root} />
-      {layout && <LinkLayer routes={layout.routes} width={layout.width} height={layout.height} labelPt={figureTokens.density[density].label} />}
-    </div>
+    <MonochromeContext.Provider value={Boolean(monochrome)}>
+      <div className="dcf" ref={root} style={style}>
+        <style>{figureCss}</style>
+        <BlockView block={spec.root} />
+        {layout && <LinkLayer routes={layout.routes} width={layout.width} height={layout.height} labelPt={figureTokens.density[density].label} />}
+      </div>
+    </MonochromeContext.Provider>
   );
 }
 

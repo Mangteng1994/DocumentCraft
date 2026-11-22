@@ -116,6 +116,39 @@ export async function rasterizeCandidate(session: FigureSession, candidate: Figu
   }
 }
 
+/** 排版失败后让模型重新排列的最多轮数。每轮多一次生成调用，只花在否则会丢掉的图上。 */
+const MAX_LAYOUT_ROUNDS = 2;
+
+/** 版面建议的数量与图形高宽比一起，比较两稿哪一稿更接近参考图的横向版面。 */
+function layoutScore(candidate: FigureCandidate): number {
+  const report = candidate.report;
+  if (!candidate.png || !report) {
+    return Number.POSITIVE_INFINITY;
+  }
+  return report.advisories.length + report.heightPt / report.widthPt;
+}
+
+/**
+ * 排版通过但版面建议非空（图偏高、竖向元素多、卡片留白大）时，带着建议重排一次。
+ * 只有新稿同样通过排版检查且版面得分更好时才替换，否则保留原稿，避免越改越差。
+ */
+async function improveLayout(session: FigureSession, candidate: FigureCandidate): Promise<FigureCandidate> {
+  const advisories = candidate.report?.advisories ?? [];
+  try {
+    const revised = await refineFigure(session, candidate, "generate", {
+      spec: candidate.spec,
+      feedback: `版面建议：${advisories.join("；")}`,
+    });
+    const next = await rasterizeCandidate(session, { ...candidate, spec: revised.spec });
+    if (layoutScore(next) < layoutScore(candidate)) {
+      return next;
+    }
+  } catch {
+    // 重排失败不影响已有的合格预览。
+  }
+  return candidate;
+}
+
 /** 本地排版失败时用反馈重新生成一次。视觉复核最多两轮，保留最近一张合格的预览。 */
 export async function prepareCandidate(
   session: FigureSession, candidate: FigureCandidate, signal: AbortSignal,
@@ -124,13 +157,20 @@ export async function prepareCandidate(
     return candidate;
   }
   let current = await rasterizeCandidate(session, candidate);
-  if (!current.png && !signal.aborted) {
+  for (let round = 0; round < MAX_LAYOUT_ROUNDS && !current.png && !signal.aborted; round += 1) {
     try {
-      const revised = await refineFigure(session, current, "generate", { spec: current.spec, feedback: current.error });
+      // 排版失败（连线无走线空间、文字折行过多等）时让模型重新排列。每轮带上最新的失败原因，
+      // 图同时偏高时把版面建议一并告诉它，最多重排两轮。
+      const advisories = current.report?.advisories ?? [];
+      const feedback = [current.error, ...advisories].filter(Boolean).join("；");
+      const revised = await refineFigure(session, current, "generate", { spec: current.spec, feedback });
       current = await rasterizeCandidate(session, { ...current, spec: revised.spec });
     } catch (error) {
       return { ...current, error: `${current.error ?? "排版失败"}；调整失败：${errorText(error)}` };
     }
+  }
+  if (current.png && current.report?.advisories.length && !signal.aborted) {
+    current = await improveLayout(session, current);
   }
   if (!session.visualReview || !current.png) {
     return current;

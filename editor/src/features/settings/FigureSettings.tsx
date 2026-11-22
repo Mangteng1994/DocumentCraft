@@ -212,8 +212,11 @@ export function FigureSettings() {
       for (const candidate of analysis.candidates) {
         if (candidate.selected && candidate.png && candidate.spec) {
           images[candidate.id] = { png: candidate.png, spec: candidate.spec };
-          if (candidate.warning) {
-            notes[candidate.id] = candidate.warning;
+          const advice = candidate.report?.advisories ?? [];
+          const noteParts = [candidate.warning, advice.length ? `版面建议：${advice.join("；")}` : undefined];
+          const note = noteParts.filter(Boolean).join("。");
+          if (note) {
+            notes[candidate.id] = note;
           }
         } else {
           skipped[candidate.id] = candidate.error || "预览后未选择回插";
@@ -362,6 +365,9 @@ function FigurePreview({ candidate, busy, onSelect, onRevise }: {
       )}
       {candidate.error && <StatusLine tone="error" text={candidate.error} />}
       {candidate.warning && <p className="dc-setting-note">{candidate.warning}</p>}
+      {candidate.png && candidate.report?.advisories.length ? (
+        <p className="dc-setting-note">版面建议：{candidate.report.advisories.join("；")}</p>
+      ) : null}
       {candidate.anchorText && (
         <details className="dc-figure-details">
           <summary>{diagram?.placement === "missing" ? "补缺图" : "新增图"} · 段落 {diagram?.anchor} 后 · 取证 {ranges.map(({ start, end }) => start === end ? start : `${start}–${end}`).join("、")}</summary>
