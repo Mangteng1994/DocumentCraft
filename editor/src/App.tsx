@@ -21,6 +21,7 @@ import { toggleCopilot } from "./features/copilot/actions";
 import { SettingsModal } from "./features/settings/SettingsModal";
 import { CompressDialog } from "./features/compress/CompressDialog";
 import { useCompress } from "./features/compress/compressStore";
+import { isFigureActive, useFigureJob } from "./features/figures/figureStore";
 import { SearchPreview } from "./features/preview/SearchPreview";
 import { FileProperties } from "./sidebar/FileProperties";
 import { DocumentTabs } from "./components/DocumentTabs";
@@ -95,6 +96,8 @@ export function App() {
   const setOverlay = useAppStore((state) => state.setOverlay);
   const compressPhase = useCompress((state) => state.phase);
   const compressOverall = useCompress((state) => state.overall);
+  const figurePhase = useFigureJob((state) => state.phase);
+  const figureProgress = useFigureJob((state) => state.progress);
   const status = useAppStore((state) => state.status);
   const notes = useAppStore((state) => state.notes);
   const loadSettings = useSettings((state) => state.load);
@@ -149,6 +152,14 @@ export function App() {
     void getCurrentWindow().setTitle(title);
   }, [filePath, dirty]);
 
+  const figureRunning = isFigureActive(figurePhase);
+  // 规划阶段是一次 sidecar 请求，没有进度事件，只显示阶段；排版阶段显示已完成/总数。
+  let figureLabel = "科研配图进行中";
+  if (figurePhase === "planning") {
+    figureLabel = "科研配图：规划中";
+  } else if (figurePhase === "preparing" && figureProgress.total > 0) {
+    figureLabel = `科研配图进行中 ${figureProgress.done}/${figureProgress.total}`;
+  }
   const hasDocument = filePath !== null;
   const ribbonIcon = { size: iconSize.md, strokeWidth: iconStroke.regular };
 
@@ -171,7 +182,12 @@ export function App() {
           pressed={compressPhase === "running" || overlay?.kind === "compress"}
         />
         <span className="dc-ribbon-spacer" />
-        <RibbonButton label="设置" icon={<Settings {...ribbonIcon} />} onClick={() => openSettings()} />
+        <RibbonButton
+          label={figureRunning ? `设置（${figureLabel}）` : "设置"}
+          icon={<Settings {...ribbonIcon} />}
+          onClick={() => openSettings(figureRunning ? "figure" : undefined)}
+          pressed={figureRunning}
+        />
       </nav>
 
       <div className={`dc-workbench${rightPanel ? " has-panel" : ""}`} style={paneWidthStyle(layout.sidebarWidth, layout.panelWidth)}>
