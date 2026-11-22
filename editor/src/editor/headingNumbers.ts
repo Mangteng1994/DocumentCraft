@@ -23,26 +23,43 @@ interface NumberingState {
 const numberingKey = new PluginKey<NumberingState>("documentcraftHeadingNumbers");
 
 /**
- * 按文档顺序为 H1～H4 生成编号。
+ * 按文档顺序为一组标题级别生成编号标签；H5、H6 等超过编号深度的级别返回 null。
  * 标题级别跳级（如 H1 后直接 H3）时，缺失的中间级别按 1 计，得到 1.1.1 而不是 1.0.1。
+ * 编辑区装饰与左侧大纲共用本函数，保证两处编号一致。
  */
-export function computeHeadingNumbers(doc: PMNode): { pos: number; label: string }[] {
+export function computeHeadingLabels(levels: readonly number[]): (string | null)[] {
   const counters: number[] = new Array(HEADING_NUMBER_MAX_LEVEL).fill(0);
-  const result: { pos: number; label: string }[] = [];
+  return levels.map((level) => {
+    if (!(level >= 1 && level <= HEADING_NUMBER_MAX_LEVEL)) {
+      return null;
+    }
+    counters[level - 1] += 1;
+    for (let deeper = level; deeper < HEADING_NUMBER_MAX_LEVEL; deeper += 1) {
+      counters[deeper] = 0;
+    }
+    const parts = counters.slice(0, level).map((value) => Math.max(value, 1));
+    return parts.join(".");
+  });
+}
+
+/** 按文档顺序为 H1～H4 生成编号及其标题节点位置。 */
+export function computeHeadingNumbers(doc: PMNode): { pos: number; label: string }[] {
+  const positions: number[] = [];
+  const levels: number[] = [];
   doc.descendants((node, pos) => {
     if (node.type.name !== "heading") {
       return true;
     }
-    const level = Number(node.attrs.level);
-    if (level >= 1 && level <= HEADING_NUMBER_MAX_LEVEL) {
-      counters[level - 1] += 1;
-      for (let deeper = level; deeper < HEADING_NUMBER_MAX_LEVEL; deeper += 1) {
-        counters[deeper] = 0;
-      }
-      const parts = counters.slice(0, level).map((value) => Math.max(value, 1));
-      result.push({ pos, label: parts.join(".") });
-    }
+    positions.push(pos);
+    levels.push(Number(node.attrs.level));
     return false;
+  });
+  const labels = computeHeadingLabels(levels);
+  const result: { pos: number; label: string }[] = [];
+  labels.forEach((label, index) => {
+    if (label !== null) {
+      result.push({ pos: positions[index], label });
+    }
   });
   return result;
 }

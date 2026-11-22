@@ -668,6 +668,12 @@ textarea {
   cursor: pointer;
 }
 
+.dc-outline-number {
+  flex-shrink: 0;
+  color: var(--dc-color-ink-muted);
+  font-variant-numeric: tabular-nums;
+}
+
 .dc-outline-text {
   overflow: hidden;
   white-space: nowrap;
