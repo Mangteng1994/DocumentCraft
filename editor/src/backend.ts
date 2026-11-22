@@ -74,6 +74,8 @@ export interface DocStats {
 export interface SearchResult {
   files: SearchFile[];
   truncated: boolean;
+  /** 文件列表扫描被文件数上限打断，列表之外的文件夹没有参与搜索。 */
+  scan_incomplete: boolean;
   docs: DocStats;
   /** 现场遍历超时，需要先在后台扫描文件夹；本次没有搜索结果。 */
   needs_scan: boolean;

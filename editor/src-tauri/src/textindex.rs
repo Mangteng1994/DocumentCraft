@@ -164,9 +164,14 @@ impl SearchIndex {
     }
 
     /// 标记开始建立索引。已有任务在运行时返回 false。
+    ///
+    /// 切换到新工作区时，释放其他工作区的文件列表和文档文本：它们占内存（大工作区可达上百 MB），
+    /// 而文档文本在磁盘缓存里有备份，切回去时会增量恢复。正在建立索引的工作区不动，避免打断任务。
     pub fn begin(&self, root: &str) -> bool {
         let mut roots = self.roots.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-        let state = roots.entry(root_key(root)).or_default();
+        let current = root_key(root);
+        roots.retain(|key, state| *key == current || state.running);
+        let state = roots.entry(current).or_default();
         if state.running {
             return false;
         }
@@ -458,5 +463,28 @@ mod tests {
         assert!(!index.begin("d:\\工作区"), "路径大小写不同也视为同一工作区");
         index.abort("D:\\工作区");
         assert!(index.begin("D:\\工作区"));
+    }
+
+    fn sample_scan() -> Arc<ScanResult> {
+        Arc::new(ScanResult { files: Vec::new(), scanned_at: Instant::now(), large: true, truncated: false })
+    }
+
+    #[test]
+    fn switching_workspace_releases_other_roots_but_not_running_ones() {
+        let index = SearchIndex::default();
+        assert!(index.begin("D:\\甲"));
+        index.store_scan("D:\\甲", sample_scan());
+        index.abort("D:\\甲");
+        assert!(index.begin("D:\\乙"));
+        index.store_scan("D:\\乙", sample_scan());
+        // 乙仍在运行：切到丙时乙必须保留，甲已空闲应被释放。
+        assert!(index.begin("D:\\丙"));
+        assert!(index.scan_snapshot("D:\\甲").is_none());
+        assert!(index.scan_snapshot("D:\\乙").is_some());
+        // 当前工作区自己的列表不会被释放。
+        index.store_scan("D:\\丙", sample_scan());
+        index.abort("D:\\丙");
+        assert!(index.begin("D:\\丙"));
+        assert!(index.scan_snapshot("D:\\丙").is_some());
     }
 }

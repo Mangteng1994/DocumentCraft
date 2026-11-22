@@ -453,6 +453,8 @@ pub struct SearchResult {
     files: Vec<SearchFile>,
     /// 达到文件数或匹配总数上限，结果不完整。
     truncated: bool,
+    /// 文件列表扫描被上限打断，列表之外的文件夹没有参与搜索；此时「没有匹配」不代表文件不存在。
+    scan_incomplete: bool,
     docs: DocStats,
     /// 现场遍历超时，需要先在后台扫描文件夹；本次没有搜索结果。
     needs_scan: bool,
@@ -466,7 +468,7 @@ pub struct SearchResult {
 
 impl SearchResult {
     fn empty() -> SearchResult {
-        SearchResult { files: Vec::new(), truncated: false, docs: DocStats::default(), needs_scan: false, large: false, file_count: 0, scan_age_seconds: 0 }
+        SearchResult { files: Vec::new(), truncated: false, scan_incomplete: false, docs: DocStats::default(), needs_scan: false, large: false, file_count: 0, scan_age_seconds: 0 }
     }
 }
 
@@ -525,7 +527,12 @@ fn snippet(chars: &[char], start: usize, length: usize) -> (String, String, Stri
 }
 
 /// 一次扫描最多收集的文件数。网络共享上的大工作区可能有几十万个文件，超出后列表标记为不完整。
-const MAX_SCAN_FILES: usize = 300_000;
+/// 扫描按文件夹名排序深度优先，到达上限后其后的文件夹整个没有进列表，所以上限要高于常见的大共享
+/// （曾为 30 万，在 30 万以上的共享里搜不到靠后文件夹中的文件）。每条记录约 150 字节，100 万条约 150 MB。
+const MAX_SCAN_FILES: usize = 1_000_000;
+/// 扫描时单个文件夹最多读取的条目数。目录树为了显示速度限制为 `MAX_ENTRIES_PER_DIR`，
+/// 但搜索不能因此丢文件：超过这个数才放弃，并把列表标记为不完整。
+const MAX_SCAN_ENTRIES_PER_DIR: usize = 200_000;
 /// 搜索时现场遍历文件夹的时间上限。超出就认为工作区较大，改为后台扫描并缓存文件列表。
 const LIVE_WALK_SECONDS: u64 = 2;
 /// 判定为大工作区的条件：文件数超过阈值、扫描耗时超过阈值，或位于网络路径（`\\服务器\共享`）。
@@ -579,7 +586,12 @@ fn walk_directory(
         return;
     };
     let mut children: Vec<(PathBuf, fs::Metadata)> = Vec::new();
-    for entry in entries.flatten().take(MAX_ENTRIES_PER_DIR) {
+    for (index, entry) in entries.flatten().enumerate() {
+        if index >= MAX_SCAN_ENTRIES_PER_DIR {
+            // 单个文件夹条目多到读不完：后面的文件搜不到，必须让界面知道列表不完整。
+            *complete = false;
+            break;
+        }
         let entry_name = entry.file_name().to_string_lossy().into_owned();
         if entry_name.starts_with('.') {
             continue;
@@ -787,7 +799,7 @@ fn search_files(files: &[FileRec], query: &str, mode: SearchMode, context: &Sear
         }
     }
     let stats = if mode.matches_content() { document_stats(files, context) } else { DocStats::default() };
-    SearchResult { files: found, truncated, docs: stats, needs_scan: false, large: context.large, file_count: files.len(), scan_age_seconds: 0 }
+    SearchResult { files: found, truncated, scan_incomplete: false, docs: stats, needs_scan: false, large: context.large, file_count: files.len(), scan_age_seconds: 0 }
 }
 
 /// 现场遍历工作区后搜索，仅供测试使用；正式路径见 `search_workspace`。
@@ -825,7 +837,7 @@ pub async fn search_workspace(
         if let Some(cached) = scan.as_ref().filter(|cached| cached.large) {
             let context = SearchContext { docs: &docs, indexing, deferred, large: true };
             let mut result = search_files(&cached.files, &query, mode, &context);
-            result.truncated |= cached.truncated;
+            result.scan_incomplete = cached.truncated;
             result.scan_age_seconds = cached.scanned_at.elapsed().as_secs();
             return Ok(result);
         }
