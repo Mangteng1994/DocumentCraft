@@ -3,19 +3,22 @@
  * 所有（文件名 + 正文）、所有文件名、所有正文。有关键词时结果列表（SearchResults）替换目录树，
  * 按文件分组。左键点击文件或某处匹配，在中间文档区弹出预览页，显示识别到的文件名、标题或正文内容（DC-066）；
  * 双击文件则直接打开：Markdown 在编辑器中打开，其他文件交给系统默认应用。
+ * 右键结果与右键目录树里的文件一致（复制、剪切、粘贴、重命名、删除、复制地址、打开本地目录、属性），空白处对应工作区根目录。
  * 搜索由 Rust 端 `search_workspace` 完成；Word、Excel、PowerPoint、PDF 的正文来自后台建立的索引，
  * 首次打开搜索时开始建立，进度显示在结果上方。
  */
 
 import { useEffect, useRef, useState } from "react";
 import { Check, ChevronDown, File, FileText, Search, X } from "lucide-react";
-import { errorText, searchWorkspace, type SearchFile, type SearchResult } from "../backend";
-import { openDocument, openWithSystem, showSearchPreview } from "../documentActions";
+import { errorText, searchWorkspace, type SearchFile, type SearchResult, type TreeNode } from "../backend";
+import { openDocument, openWithSystem, renamePath, showSearchPreview } from "../documentActions";
 import { parentDirectory, relativePath } from "../paths";
 import { SEARCH_MODES, type SearchMode } from "../settings/schema";
 import { useSettings } from "../settings/settingsStore";
 import { useAppStore } from "../store";
+import { RenameInput } from "./FileTree";
 import { startIndexing } from "./searchIndex";
+import { TreeContextMenu, type TreeMenuState } from "./TreeContextMenu";
 import { iconSize, iconStroke } from "../styles/tokens";
 
 /** 停止输入多久后发起搜索，避免每敲一个字就遍历一次工作区。 */
@@ -178,31 +181,77 @@ export function SearchBar() {
   );
 }
 
-function SearchFileGroup({ file, root, query, mode }: { file: SearchFile; root: string; query: string; mode: SearchMode }) {
+/** 把搜索结果里的文件转成文件树节点，让搜索结果与目录树共用同一套右键菜单。 */
+function fileToTreeNode(file: SearchFile): TreeNode {
+  return {
+    name: file.name,
+    path: file.path,
+    is_dir: false,
+    children: [],
+    loaded: true,
+    truncated: false,
+    lazy: false,
+    modified: 0,
+  };
+}
+
+interface SearchFileGroupProps {
+  file: SearchFile;
+  root: string;
+  query: string;
+  mode: SearchMode;
+  /** 当前打开右键菜单的文件路径，用于高亮该行。 */
+  menuPath: string | null;
+  /** 正在重命名的文件路径。 */
+  renaming: string | null;
+  onContextMenu: (x: number, y: number, file: SearchFile) => void;
+  onFinishRename: (file: SearchFile, name: string) => Promise<boolean>;
+  onCancelRename: () => void;
+}
+
+function SearchFileGroup(props: SearchFileGroupProps) {
+  const { file, root, query, mode, menuPath, renaming, onContextMenu, onFinishRename, onCancelRename } = props;
   const folder = relativePath(root, parentDirectory(file.path));
   const isMarkdown = MARKDOWN_NAME.test(file.name);
+  const isRenaming = renaming === file.path;
+  const isMenuTarget = menuPath === file.path;
   /** 弹出预览页；focusLocator 为被点击匹配的位置说明，预览页据此滚动到对应命中。 */
   const preview = (focusLocator: string) => {
     showSearchPreview({ path: file.path, name: file.name, query, mode, focusLocator });
   };
+  // 文件行和匹配行的右键都以该文件为对象，与目录树里右键文件一致；阻止冒泡，空白处的菜单由外层处理。
+  const handleContextMenu = (event: React.MouseEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    onContextMenu(event.clientX, event.clientY, file);
+  };
+  const icon = isMarkdown ? (
+    <FileText size={iconSize.sm} strokeWidth={iconStroke.regular} />
+  ) : (
+    <File size={iconSize.sm} strokeWidth={iconStroke.regular} />
+  );
   return (
-    <li className="dc-search-file">
-      <button
-        type="button"
-        className="dc-search-file-row"
-        title={`${file.path}\n单击预览，双击打开`}
-        onClick={() => preview("")}
-        onDoubleClick={() => openFile(file)}
-      >
-        {isMarkdown ? (
-          <FileText size={iconSize.sm} strokeWidth={iconStroke.regular} />
-        ) : (
-          <File size={iconSize.sm} strokeWidth={iconStroke.regular} />
-        )}
-        <span className={`dc-search-file-name${file.name_match ? " is-name-match" : ""}`}>{file.name}</span>
-        {folder && <span className="dc-search-file-folder">{folder}</span>}
-        {file.matches.length > 0 && <span className="dc-search-count">{file.matches.length}</span>}
-      </button>
+    <li className="dc-search-file" onContextMenu={handleContextMenu}>
+      {isRenaming ? (
+        // 重命名时用 div 承载输入框：按钮里不能嵌套输入框。
+        <div className="dc-search-file-row is-renaming">
+          {icon}
+          <RenameInput initialName={file.name} isDir={false} onCommit={(name) => onFinishRename(file, name)} onCancel={onCancelRename} />
+        </div>
+      ) : (
+        <button
+          type="button"
+          className={`dc-search-file-row${isMenuTarget ? " is-menu-target" : ""}`}
+          title={`${file.path}\n单击预览，双击打开`}
+          onClick={() => preview("")}
+          onDoubleClick={() => openFile(file)}
+        >
+          {icon}
+          <span className={`dc-search-file-name${file.name_match ? " is-name-match" : ""}`}>{file.name}</span>
+          {folder && <span className="dc-search-file-folder">{folder}</span>}
+          {file.matches.length > 0 && <span className="dc-search-count">{file.matches.length}</span>}
+        </button>
+      )}
       {file.matches.length > 0 && (
         <ul className="dc-search-matches">
           {file.matches.map((match) => (
@@ -235,6 +284,10 @@ export function SearchResults() {
   const [searching, setSearching] = useState(false);
   const [error, setError] = useState("");
   const trimmed = query.trim();
+  // 右键菜单与重命名：与目录树一致。file 为 null 表示在结果列表空白处右键，对象是工作区根目录。
+  const tree = useAppStore((state) => state.tree);
+  const [menu, setMenu] = useState<TreeMenuState | null>(null);
+  const [renaming, setRenaming] = useState<string | null>(null);
 
   useEffect(() => {
     if (!workspace || !trimmed) {
@@ -270,7 +323,7 @@ export function SearchResults() {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [workspace, trimmed, mode, indexVersion]);
+  }, [workspace, trimmed, mode, indexVersion, tree]);
 
   // 现场遍历超时（工作区很大）：先在后台扫描文件夹，扫描完成后会自动重新搜索。
   useEffect(() => {
@@ -298,6 +351,22 @@ export function SearchResults() {
   if (!workspace) {
     return <div className="dc-sidebar-empty">打开工作区后可以搜索其中的文档。</div>;
   }
+
+  const openFileMenu = (x: number, y: number, file: SearchFile) => {
+    setMenu({ x, y, node: fileToTreeNode(file) });
+  };
+  const startRename = (node: TreeNode) => {
+    setMenu(null);
+    setRenaming(node.path);
+  };
+  const finishRename = async (file: SearchFile, name: string): Promise<boolean> => {
+    const target = await renamePath(file.path, name);
+    if (target === null) {
+      return false;
+    }
+    setRenaming(null);
+    return true;
+  };
 
   const fileCount = result?.files.length ?? 0;
   const matchCount = result ? countMatches(result) : 0;
@@ -348,7 +417,13 @@ export function SearchResults() {
   const busy = indexProgress?.running === true;
 
   return (
-    <div className="dc-search">
+    <div
+      className="dc-search"
+      onContextMenu={(event) => {
+        event.preventDefault();
+        setMenu({ x: event.clientX, y: event.clientY, node: null });
+      }}
+    >
       {summary && (
         <div className="dc-search-summary" role="status">
           {summary}
@@ -383,9 +458,23 @@ export function SearchResults() {
       {result && fileCount > 0 && (
         <ul className="dc-search-results" aria-label="搜索结果">
           {result.files.map((file) => (
-            <SearchFileGroup key={file.path} file={file} root={workspace} query={trimmed} mode={mode} />
+            <SearchFileGroup
+              key={file.path}
+              file={file}
+              root={workspace}
+              query={trimmed}
+              mode={mode}
+              menuPath={menu?.node?.path ?? null}
+              renaming={renaming}
+              onContextMenu={openFileMenu}
+              onFinishRename={finishRename}
+              onCancelRename={() => setRenaming(null)}
+            />
           ))}
         </ul>
+      )}
+      {menu && (
+        <TreeContextMenu menu={menu} rootPath={tree?.path ?? workspace} onRename={startRename} onPasted={() => undefined} onClose={() => setMenu(null)} />
       )}
     </div>
   );

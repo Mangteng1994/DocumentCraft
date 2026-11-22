@@ -144,7 +144,7 @@ interface RenameInputProps {
 }
 
 /** 行内重命名输入框：默认选中不含扩展名的部分；Enter 提交，Esc 取消，点到别处视为提交（失败则放弃编辑）。 */
-function RenameInput({ initialName, isDir, onCommit, onCancel }: RenameInputProps) {
+export function RenameInput({ initialName, isDir, onCommit, onCancel }: RenameInputProps) {
   const input = useRef<HTMLInputElement>(null);
   const [value, setValue] = useState(initialName);
   const busy = useRef(false);

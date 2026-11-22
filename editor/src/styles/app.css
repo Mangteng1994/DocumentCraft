@@ -2471,6 +2471,15 @@ textarea {
 }
 
 /* 工作区搜索（DC-051） */
+/* 撑满侧栏，让结果下方的空白处也能右键。 */
+.dc-search {
+  min-height: 100%;
+}
+
+.dc-search-file-row.is-menu-target {
+  background: var(--dc-color-surface-selected);
+}
+
 .dc-search-summary {
   padding: 0 var(--dc-space-lg) var(--dc-space-sm);
   color: var(--dc-color-ink-faint);
