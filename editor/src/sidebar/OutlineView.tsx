@@ -8,6 +8,7 @@ import { memo, useCallback, useDeferredValue, useMemo, useState } from "react";
 import { ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, ListOrdered, Search, X } from "lucide-react";
 import { buildHeadingTree, filterHeadingTree, type HeadingNode } from "@vmark/utils/markdownOutline";
 import { getEditor, revealPosition } from "../editor/editorHandle";
+import { computeHeadingLabels } from "../editor/headingNumbers";
 import { useAppStore } from "../store";
 import { useSettings } from "../settings/settingsStore";
 import { iconSize } from "../styles/tokens";
@@ -17,6 +18,7 @@ const OutlineItem = memo(function OutlineItem({
   collapsed,
   forceExpand,
   activeIndex,
+  numberLabels,
   onToggle,
   onSelect,
 }: {
@@ -24,6 +26,8 @@ const OutlineItem = memo(function OutlineItem({
   collapsed: Set<string>;
   forceExpand: boolean;
   activeIndex: number | null;
+  /** 与编辑区一致的标题编号，按标题在文档中的顺序索引；关闭标题编号时为 null。 */
+  numberLabels: (string | null)[] | null;
   onToggle: (key: string) => void;
   onSelect: (node: HeadingNode) => void;
 }) {
@@ -31,6 +35,7 @@ const OutlineItem = memo(function OutlineItem({
   const hasChildren = node.children.length > 0;
   const isCollapsed = !forceExpand && collapsed.has(key);
   const isActive = activeIndex === node.index;
+  const numberLabel = numberLabels ? numberLabels[node.index] : null;
 
   return (
     <li className="dc-outline-item">
@@ -66,6 +71,7 @@ const OutlineItem = memo(function OutlineItem({
         <span className="dc-outline-level" aria-label={`${node.level} 级标题`}>
           H{node.level}
         </span>
+        {numberLabel && <span className="dc-outline-number">{numberLabel}</span>}
         <span className="dc-outline-text" title={node.text}>
           {node.text}
         </span>
@@ -79,6 +85,7 @@ const OutlineItem = memo(function OutlineItem({
               collapsed={collapsed}
               forceExpand={forceExpand}
               activeIndex={activeIndex}
+              numberLabels={numberLabels}
               onToggle={onToggle}
               onSelect={onSelect}
             />
@@ -117,6 +124,11 @@ export function OutlineView() {
   const filterActive = deferredQuery.trim().length > 0;
 
   const tree = useMemo(() => buildHeadingTree(headings), [headings]);
+  // 编号按完整标题列表计算（过滤只影响显示），因此过滤后各标题的编号保持不变。
+  const numberLabels = useMemo(
+    () => (headingNumbers ? computeHeadingLabels(headings.map((heading) => heading.level)) : null),
+    [headings, headingNumbers],
+  );
   const visibleTree = useMemo(() => filterHeadingTree(tree, deferredQuery), [tree, deferredQuery]);
 
   const handleToggle = useCallback((key: string) => {
@@ -199,6 +211,7 @@ export function OutlineView() {
               collapsed={collapsed}
               forceExpand={filterActive}
               activeIndex={activeIndex}
+              numberLabels={numberLabels}
               onToggle={handleToggle}
               onSelect={handleSelect}
             />
