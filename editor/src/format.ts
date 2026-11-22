@@ -18,3 +18,17 @@ export function formatSize(bytes: number): string {
   }
   return `${value.toFixed(1)} ${BYTE_UNITS[unit]}（${bytes.toLocaleString()} 字节）`;
 }
+
+/** 简短体积，如「252.3 MB」，用于进度与结果摘要。 */
+export function formatSizeShort(bytes: number): string {
+  if (bytes < BYTES_PER_UNIT) {
+    return `${bytes} 字节`;
+  }
+  let value = bytes;
+  let unit = 0;
+  while (value >= BYTES_PER_UNIT && unit < BYTE_UNITS.length - 1) {
+    value /= BYTES_PER_UNIT;
+    unit += 1;
+  }
+  return `${value.toFixed(1)} ${BYTE_UNITS[unit]}`;
+}

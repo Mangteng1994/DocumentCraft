@@ -1,12 +1,12 @@
 /**
  * 应用外壳，布局参照 Obsidian：
- * 左侧 Ribbon（打开文件夹、打开文件、Copilot、批注，底部为设置）、左侧栏（文件 / 大纲 / 搜索）、
+ * 左侧 Ribbon（打开文件夹、打开文件、Copilot、批注、压缩文档媒体，底部为设置）、左侧栏（文件 / 大纲 / 搜索）、
  * 中间编辑区（顶部文档页签）、右侧栏（Copilot / 批注）和状态栏（左侧为工作区切换）。左右侧栏可拖动调宽。
  * MD 转 Word 与科研流程图从「设置」进入，不在主界面放置按钮。
  */
 
 import { useEffect, type ReactNode } from "react";
-import { Bot, FileText, FolderOpen, MessageSquare, Settings, X } from "lucide-react";
+import { Bot, FileText, FolderOpen, MessageSquare, Minimize2, Settings, X } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { ask } from "@tauri-apps/plugin-dialog";
 import { MarkdownEditor } from "./editor/MarkdownEditor";
@@ -19,6 +19,8 @@ import { QuickAsk } from "./features/copilot/QuickAsk";
 import { useCopilot } from "./features/copilot/copilotStore";
 import { toggleCopilot } from "./features/copilot/actions";
 import { SettingsModal } from "./features/settings/SettingsModal";
+import { CompressDialog } from "./features/compress/CompressDialog";
+import { useCompress } from "./features/compress/compressStore";
 import { SearchPreview } from "./features/preview/SearchPreview";
 import { FileProperties } from "./sidebar/FileProperties";
 import { DocumentTabs } from "./components/DocumentTabs";
@@ -75,6 +77,9 @@ function ActiveOverlay({ overlay }: { overlay: Overlay }) {
   if (overlay.kind === "insertTable") {
     return <InsertTablePicker />;
   }
+  if (overlay.kind === "compress") {
+    return <CompressDialog />;
+  }
   return <QuickAsk commandName={overlay.commandName} />;
 }
 
@@ -87,6 +92,9 @@ export function App() {
   const overlay = useAppStore((state) => state.overlay);
   const preview = useAppStore((state) => state.preview);
   const openSettings = useAppStore((state) => state.openSettings);
+  const setOverlay = useAppStore((state) => state.setOverlay);
+  const compressPhase = useCompress((state) => state.phase);
+  const compressOverall = useCompress((state) => state.overall);
   const status = useAppStore((state) => state.status);
   const notes = useAppStore((state) => state.notes);
   const loadSettings = useSettings((state) => state.load);
@@ -155,6 +163,12 @@ export function App() {
           icon={<MessageSquare {...ribbonIcon} />}
           onClick={() => setRightPanel(rightPanel === "comments" ? null : "comments")}
           pressed={rightPanel === "comments"}
+        />
+        <RibbonButton
+          label={compressPhase === "running" ? `压缩文档媒体（进行中 ${Math.round(compressOverall * 100)}%）` : "压缩文档媒体"}
+          icon={<Minimize2 {...ribbonIcon} />}
+          onClick={() => setOverlay({ kind: "compress" })}
+          pressed={compressPhase === "running" || overlay?.kind === "compress"}
         />
         <span className="dc-ribbon-spacer" />
         <RibbonButton label="设置" icon={<Settings {...ribbonIcon} />} onClick={() => openSettings()} />

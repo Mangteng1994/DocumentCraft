@@ -118,6 +118,19 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\publish-release.ps
 | `docflow illustrate --source 报告 --style mono\|colored` | 科研配图 |
 | `docflow assistant search\|organize --workspace 目录 --question 问题` | 工作区检索与整理 |
 | `docflow ai status\|save\|login\|logout\|models` | AI 设置与 ChatGPT 登录 |
+| `docflow compress --source 文档.pptx` | 压缩 pptx、docx、xlsx 内嵌的视频与图片（选项经标准输入传 `{"video": true, "image": true}`），逐行输出进度事件，结束时输出含 `status` 的汇总 |
+
+## 压缩文档媒体
+
+左侧功能区的「压缩文档媒体」按钮（DC-073）用于瘦身历史 PPT、Word、Excel：选择 pptx、docx 或 xlsx，勾选「视频」「图片」（默认全选），点「压缩」后在后台处理，窗口可关闭，任务继续并在状态栏和按钮上显示进度，可随时取消。结果保存为原文件同目录的「原名_压缩版.后缀」，已存在时编号为「原名_压缩版 (2).后缀」，原文件不会改动。
+
+实现方式是在 zip 层同名替换 `ppt/media/`、`word/media/`、`xl/media/` 里的文件，其余条目原样复制，所以页面上的位置、裁剪和动画不变：
+
+- 视频：随包的 ffmpeg（独立进程，libx264，CRF 23）重编码，不缩放、保持帧时间、旋转标记和音轨；奇数宽高的视频、重编码后不更小的视频保持原样。
+- 图片：JPEG 保留 EXIF、ICC、DPI 后重编码（质量 85），源文件质量不高于目标时改走 MozJPEG 无损优化；PNG 用 oxipng 无损优化，动画 PNG 跳过。像素尺寸不变。
+- 节省不足 5%、尺寸校验不通过、格式不认识的媒体一律保持原样。只支持 OOXML，旧版 ppt、doc、xls 需先另存为新格式。
+
+开发时 `docflow` 从环境变量 `DOCUMENTCRAFT_FFMPEG` 或 PATH 里找 ffmpeg；打包时 `build-sidecar.ps1` 把 PATH 中的（或 `-Ffmpeg` 指定的）`ffmpeg.exe` 放进 `engine/`。需要带 libx264 的 GPL 构建，分发时请随附其许可证与源码获取说明。`core/tools/verify_office_media.py 原文件 压缩版` 可核对条目、非媒体内容、图片和视频尺寸、时长与帧数。
 
 ## 命令行转换
 

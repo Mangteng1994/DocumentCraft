@@ -215,10 +215,31 @@ pub fn docflow_cancel(jobs: tauri::State<'_, Jobs>, job: String) -> Result<(), S
         table.remove(&job)
     };
     if let Some(mut process) = child {
+        // sidecar 可能再启动 ffmpeg、Pandoc 等子进程。只结束 sidecar 会让它们变成孤儿继续占用 CPU，
+        // 所以 Windows 下先用 taskkill /T 结束整棵进程树，再兜底结束自己。
+        kill_process_tree(process.id());
         let _ = process.kill();
         let _ = process.wait();
     }
     Ok(())
+}
+
+/// 结束指定进程及其全部子进程。非 Windows 平台没有对应的随系统命令，保持仅结束自身。
+fn kill_process_tree(pid: u32) {
+    #[cfg(windows)]
+    {
+        let mut command = Command::new("taskkill");
+        command.args(["/PID", &pid.to_string(), "/T", "/F"]);
+        command.stdin(Stdio::null());
+        command.stdout(Stdio::null());
+        command.stderr(Stdio::null());
+        hide_console(&mut command);
+        let _ = command.status();
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = pid;
+    }
 }
 
 /// 返回进行中的 docflow 任务数。安装更新会替换 sidecar，任务未结束时前端据此拒绝安装。

@@ -1,6 +1,7 @@
 param(
     [string]$Python = (Join-Path $PSScriptRoot '..\.venv\Scripts\python.exe'),
     [string]$Pandoc = (Get-Command pandoc.exe -ErrorAction Stop).Source,
+    [string]$Ffmpeg = '',
     [string]$Output = 'out\sidecar'
 )
 
@@ -15,6 +16,25 @@ if ((Split-Path -Leaf $pandocExe) -ne 'pandoc.exe') {
 $pandocDir = Split-Path -Parent $pandocExe
 $copyright = Join-Path $pandocDir 'COPYRIGHT.txt'
 $copying = Join-Path $pandocDir 'COPYING.rtf'
+# Media compression (DC-073) runs ffmpeg as a separate process. The GPL build (with libx264) is required for
+# video; without it the sidecar still builds and video compression reports that ffmpeg is missing.
+if (-not $Ffmpeg) {
+    $ffmpegCommand = Get-Command ffmpeg.exe -ErrorAction SilentlyContinue
+    if ($ffmpegCommand) {
+        $Ffmpeg = $ffmpegCommand.Source
+    }
+}
+$ffmpegArgs = @()
+if ($Ffmpeg) {
+    $ffmpegExe = (Resolve-Path -LiteralPath $Ffmpeg).Path
+    if ((Split-Path -Leaf $ffmpegExe) -ne 'ffmpeg.exe') {
+        throw 'Select ffmpeg.exe.'
+    }
+    $ffmpegArgs = @('--add-binary', "${ffmpegExe}:engine")
+}
+else {
+    Write-Warning 'ffmpeg.exe not found: the sidecar will not compress videos. Pass -Ffmpeg to bundle it.'
+}
 # PyInstaller resolves bundled resources relative to its generated spec directory.
 $figureSkill = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\core\src\documentcraft\figure_skill.md')).Path
 
@@ -41,9 +61,13 @@ try {
         '--add-data', "${figureSkill}:documentcraft",
         '--add-binary', "${pandocExe}:engine", '--add-data', "${copyright}:engine", '--add-data', "${copying}:engine",
         '--add-binary', "${sqliteDll}:.",
+        '--collect-all', 'oxipng', '--collect-all', 'mozjpeg_lossless_optimization',
         'core\src\documentcraft\__main__.py'
     )
-    & $pythonExe -m PyInstaller @buildArgs
+    # The entry script must stay the last argument, so ffmpeg options are spliced in before it.
+    $entryScript = $buildArgs[-1]
+    $optionArgs = $buildArgs[0..($buildArgs.Count - 2)] + $ffmpegArgs
+    & $pythonExe -m PyInstaller @optionArgs $entryScript
     if ($LASTEXITCODE -ne 0) {
         throw "EXE build failed with exit code $LASTEXITCODE."
     }
