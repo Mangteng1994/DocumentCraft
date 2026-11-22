@@ -312,7 +312,7 @@ export function SearchResults() {
   } else if (error) {
     summary = error;
   } else if (result && fileCount === 0) {
-    summary = "没有找到匹配的文件。";
+    summary = result.scan_incomplete ? "没有在已扫描的文件中找到匹配的文件，文件可能在未扫描的部分。" : "没有找到匹配的文件。";
   } else if (result) {
     summary = mode === "names" ? `${fileCount} 个文件名匹配` : `${fileCount} 个文件，${matchCount} 处正文匹配`;
     if (result.truncated) {
@@ -360,6 +360,11 @@ export function SearchResults() {
           <button type="button" className="dc-link-button" disabled={busy} onClick={() => void startIndexing(workspace, { refresh: true })}>
             重新扫描
           </button>
+        </div>
+      )}
+      {result?.scan_incomplete && !result.needs_scan && (
+        <div className="dc-search-note">
+          文件太多，只扫描了前 {result.file_count.toLocaleString()} 个文件，其余文件夹没有参与搜索。请把工作区改为更具体的子文件夹后再搜索。
         </div>
       )}
       {showDeferred && docs && (
