@@ -30,6 +30,19 @@ export function MarkdownEditor() {
       handleDOMEvents: {
         click: (_view, event) => {
           const target = event.target as HTMLElement | null;
+          // 点击图片：在图片下方显示路径浮窗（DC-079）。路径取自 data-src，即 Markdown 中的原始写法。
+          if (target instanceof HTMLImageElement) {
+            const rect = target.getBoundingClientRect();
+            const source = target.dataset.src ?? "";
+            useAppStore.getState().setImagePopover({
+              src: source,
+              missing: target.classList.contains("is-missing"),
+              left: rect.left,
+              top: rect.top,
+              bottom: rect.bottom,
+            });
+            return false;
+          }
           const highlight = target?.closest<HTMLElement>("[data-note-id]");
           if (!highlight) {
             return false;

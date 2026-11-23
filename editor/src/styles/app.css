@@ -2154,6 +2154,47 @@ textarea {
   user-select: none;
 }
 
+/* 正文标题收拢（DC-078）：按钮在标题末尾，悬停标题时显示，已收拢时常显；收拢的标题及其编号变浅灰，其下内容隐藏。 */
+.dc-fold-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--dc-size-fold-toggle);
+  height: var(--dc-size-fold-toggle);
+  margin-left: var(--dc-space-xs);
+  border-radius: var(--dc-radius-sm);
+  color: var(--dc-color-ink-faint);
+  font-family: var(--dc-font-ui);
+  font-size: var(--dc-font-size-sm);
+  font-weight: var(--dc-font-weight-regular);
+  line-height: 1;
+  vertical-align: middle;
+  opacity: 0;
+  cursor: pointer;
+  user-select: none;
+  transition: opacity var(--dc-duration-fast) var(--dc-easing-standard);
+}
+
+.dc-document :is(h1, h2, h3, h4, h5, h6):hover .dc-fold-toggle,
+.dc-fold-toggle.is-folded,
+.dc-fold-toggle:focus-visible {
+  opacity: 1;
+}
+
+.dc-fold-toggle:hover {
+  background: var(--dc-color-surface-hover);
+  color: var(--dc-color-ink-muted);
+}
+
+.dc-document .dc-heading-folded,
+.dc-document .dc-heading-folded .dc-heading-number {
+  color: var(--dc-color-heading-folded);
+}
+
+.dc-document .dc-fold-hidden {
+  display: none;
+}
+
 /* 虚拟标题编号（DC-072）：只是装饰，保留尾部空格作为与标题文字的间隔。 */
 .dc-heading-number {
   white-space: pre;
@@ -2288,7 +2329,9 @@ textarea {
   white-space: pre-wrap;
 }
 
-/* 表格：按内容宽度排版，过宽时在表格内横向滚动；隔行浅底 */
+/* 表格：按内容宽度排版，过宽时在表格内横向滚动；隔行浅底。
+   横向滚动（DC-080）依赖单元格有最小宽度：.dc-document 上的 word-break: break-word 会把最小内容宽度压到
+   一个字符，表格因此永远能挤进版心、不会溢出。单元格改回按词换行并设列最小宽度，列多或内容长时才会溢出并出现滚动条。 */
 .dc-document table {
   display: block;
   overflow-x: auto;
@@ -2302,9 +2345,12 @@ textarea {
 
 .dc-document th,
 .dc-document td {
+  min-width: var(--dc-size-table-col-min);
   padding: var(--dc-space-cell-y) var(--dc-space-cell-x);
   border: var(--dc-border);
   vertical-align: top;
+  word-break: normal;
+  overflow-wrap: break-word;
 }
 
 .dc-document th {
@@ -2342,6 +2388,51 @@ textarea {
   margin-top: var(--dc-space-xs);
   color: var(--dc-color-ink-muted);
   font-size: var(--dc-font-scale-caption);
+}
+
+/* 图片路径浮窗（DC-079）：点击编辑区图片后显示原始路径、本地位置和复制、打开所在文件夹。 */
+.dc-image-popover {
+  position: fixed;
+  z-index: var(--dc-z-popover);
+  display: flex;
+  flex-direction: column;
+  gap: var(--dc-space-md);
+  width: var(--dc-size-image-popover);
+  max-width: calc(100vw - 2 * var(--dc-space-md));
+  margin: var(--dc-space-xs) 0;
+  padding: var(--dc-space-md);
+  border: var(--dc-border);
+  border-radius: var(--dc-radius-md);
+  background: var(--dc-color-surface-raised);
+  box-shadow: var(--dc-shadow-popover);
+  font-size: var(--dc-font-size-sm);
+}
+
+.dc-image-popover-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dc-space-2xs);
+}
+
+.dc-image-popover-label {
+  color: var(--dc-color-ink-muted);
+}
+
+.dc-image-popover-path {
+  font-family: var(--dc-font-mono);
+  font-size: var(--dc-font-size-sm);
+  word-break: break-all;
+  user-select: text;
+}
+
+.dc-image-popover-note {
+  color: var(--dc-color-ink-muted);
+}
+
+.dc-image-popover-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--dc-space-sm);
 }
 
 /* 找不到的图片（DC-053）：显示「找不到图片：文件名」占位，悬停显示原地址。 */

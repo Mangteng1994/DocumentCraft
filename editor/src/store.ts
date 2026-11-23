@@ -47,6 +47,16 @@ export interface ContextMenuState {
   y: number;
 }
 
+/** 点击编辑区图片后的路径浮窗（DC-079）：src 为 Markdown 中的原始路径，矩形为图片在窗口中的位置。 */
+export interface ImagePopoverState {
+  src: string;
+  /** 图片加载失败（找不到文件）时为 true，此时不提供「打开所在文件夹」。 */
+  missing: boolean;
+  left: number;
+  top: number;
+  bottom: number;
+}
+
 /** 编辑区顶部的一个页签。内容和撤销历史保存在 documentActions 的页签现场中。 */
 export interface DocumentTab {
   path: string;
@@ -79,6 +89,8 @@ export interface AppState {
   /** 打开的页签，顺序即显示顺序；filePath 为当前页签。 */
   tabs: DocumentTab[];
   headings: HeadingItem[];
+  /** 大纲中已折叠的标题键（见 sidebar/outlineFold.ts）；切换文档时清空（DC-077）。 */
+  outlineCollapsed: Set<string>;
   /** 文档内容每次变化后递增，供批注面板刷新定位状态。 */
   docVersion: number;
   notes: Note[];
@@ -87,6 +99,7 @@ export interface AppState {
   rightPanel: RightPanel;
   overlay: Overlay;
   contextMenu: ContextMenuState | null;
+  imagePopover: ImagePopoverState | null;
   /** 右键「添加批注」时递增，批注面板据此为当前选区开始新建批注。 */
   commentRequest: number;
   /** 侧栏顶部的搜索框是否打开（Ctrl+F）。 */
@@ -117,6 +130,7 @@ export interface AppState {
   openTab: (path: string) => void;
   removeTab: (path: string) => void;
   setHeadings: (headings: HeadingItem[]) => void;
+  setOutlineCollapsed: (collapsed: Set<string>) => void;
   bumpDocVersion: () => void;
   setNotes: (notes: Note[]) => void;
   setActiveNoteId: (id: string | null) => void;
@@ -125,6 +139,7 @@ export interface AppState {
   setOverlay: (overlay: Overlay) => void;
   openSettings: (tab?: SettingsTab) => void;
   setContextMenu: (menu: ContextMenuState | null) => void;
+  setImagePopover: (popover: ImagePopoverState | null) => void;
   requestComment: () => void;
   setSearchQuery: (query: string) => void;
   openSearch: () => void;
@@ -143,6 +158,7 @@ export const useAppStore = create<AppState>((set) => ({
   dirty: false,
   tabs: [],
   headings: [],
+  outlineCollapsed: new Set<string>(),
   docVersion: 0,
   notes: [],
   activeNoteId: null,
@@ -150,6 +166,7 @@ export const useAppStore = create<AppState>((set) => ({
   rightPanel: null,
   overlay: null,
   contextMenu: null,
+  imagePopover: null,
   commentRequest: 0,
   searchOpen: false,
   searchQuery: "",
@@ -165,7 +182,9 @@ export const useAppStore = create<AppState>((set) => ({
   setWorkspace: (workspace, tree) => set((state) => ({ workspace, tree, indexProgress: workspace === state.workspace ? state.indexProgress : null })),
   setTree: (tree) => set({ tree }),
   mergeTreeNode: (loaded) => set((state) => ({ tree: state.tree ? replaceTreeNode(state.tree, loaded) : state.tree })),
-  setFilePath: (filePath) => set({ filePath }),
+  // 大纲折叠键由标题层级、文字和序号组成，换文档后不再适用，随之清空。
+  setFilePath: (filePath) =>
+    set((state) => (state.filePath === filePath ? {} : { filePath, outlineCollapsed: new Set<string>() })),
   // 未保存状态同时记在当前页签上，切换页签后据此恢复。
   setDirty: (dirty) =>
     set((state) => ({
@@ -184,6 +203,7 @@ export const useAppStore = create<AppState>((set) => ({
     }),
   removeTab: (path) => set((state) => ({ tabs: state.tabs.filter((tab) => tab.path !== path) })),
   setHeadings: (headings) => set({ headings }),
+  setOutlineCollapsed: (outlineCollapsed) => set({ outlineCollapsed }),
   bumpDocVersion: () => set((state) => ({ docVersion: state.docVersion + 1 })),
   setNotes: (notes) => set({ notes }),
   setActiveNoteId: (activeNoteId) => set({ activeNoteId }),
@@ -192,6 +212,7 @@ export const useAppStore = create<AppState>((set) => ({
   setOverlay: (overlay) => set({ overlay, contextMenu: null }),
   openSettings: (tab = "appearance") => set({ overlay: { kind: "settings", tab }, contextMenu: null }),
   setContextMenu: (contextMenu) => set({ contextMenu }),
+  setImagePopover: (imagePopover) => set({ imagePopover }),
   requestComment: () => set((state) => ({ commentRequest: state.commentRequest + 1 })),
   setSearchQuery: (searchQuery) => set({ searchQuery }),
   // 搜索的是整个工作区，结果替换目录树，所以打开搜索时切到「文件」视图。

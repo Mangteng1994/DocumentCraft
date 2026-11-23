@@ -15,6 +15,7 @@ import { resolveImageSource } from "./assets";
 import { annotationExtension } from "./annotations";
 import { imageSupportExtension } from "./imageSupport";
 import { headingNumbersExtension } from "./headingNumbers";
+import { headingFoldExtension } from "./headingFold";
 
 /** 管线为块节点记录的空行数和源码行号，参与原文空行的保留。 */
 const BLOCK_TYPES = [
@@ -323,5 +324,6 @@ export function createExtensions() {
     annotationExtension,
     imageSupportExtension,
     headingNumbersExtension,
+    headingFoldExtension,
   ];
 }

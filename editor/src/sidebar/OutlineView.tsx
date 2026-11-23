@@ -2,16 +2,27 @@
  * 文档大纲。移植自 VMark Sidebar/OutlineView：沿用其标题树、过滤与折叠逻辑
  * （vendor/vmark/utils/markdownOutline），去掉多窗口事件、按标签页保存的折叠状态和多格式分发。
  * 标题直接取自编辑器文档，点击跳到对应标题节点。
+ * 折叠状态在应用状态里（outlineCollapsed），以便快捷键按层级折叠（DC-077）。
  */
 
 import { memo, useCallback, useDeferredValue, useMemo, useState } from "react";
-import { ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, ListOrdered, Search, X } from "lucide-react";
+import { ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, ListChevronsDownUp, ListOrdered, Search, X } from "lucide-react";
 import { buildHeadingTree, filterHeadingTree, type HeadingNode } from "@vmark/utils/markdownOutline";
+import { PopupMenu } from "../components/PopupMenu";
 import { getEditor, revealPosition } from "../editor/editorHandle";
 import { computeHeadingLabels } from "../editor/headingNumbers";
 import { useAppStore } from "../store";
+import type { MenuEntry } from "../editor/EditorContextMenu";
+import type { ActionId } from "../settings/schema";
 import { useSettings } from "../settings/settingsStore";
 import { iconSize } from "../styles/tokens";
+import { collectCollapsedKeys, foldOutlineToLevel, headingKey, OUTLINE_FOLD_LEVELS } from "./outlineFold";
+
+const FOLD_LEVEL_ENTRIES: { level: (typeof OUTLINE_FOLD_LEVELS)[number]; label: string; hotkey: ActionId }[] = [
+  { level: 1, label: "只留一级标题", hotkey: "outlineLevel1" },
+  { level: 2, label: "只留到二级标题", hotkey: "outlineLevel2" },
+  { level: 3, label: "只留到三级标题", hotkey: "outlineLevel3" },
+];
 
 const OutlineItem = memo(function OutlineItem({
   node,
@@ -96,29 +107,15 @@ const OutlineItem = memo(function OutlineItem({
   );
 });
 
-/** 标题节点的折叠键，与 OutlineItem 中的 key 保持一致。 */
-function headingKey(node: HeadingNode): string {
-  return `${node.level}:${node.text}:${node.index}`;
-}
-
-/** 收集所有带子标题的节点的折叠键，供「全部折叠」使用。 */
-function collectCollapsible(nodes: HeadingNode[], result: Set<string>): Set<string> {
-  for (const node of nodes) {
-    if (node.children.length > 0) {
-      result.add(headingKey(node));
-      collectCollapsible(node.children, result);
-    }
-  }
-  return result;
-}
-
 export function OutlineView() {
   const headings = useAppStore((state) => state.headings);
   const filePath = useAppStore((state) => state.filePath);
   const headingNumbers = useSettings((state) => state.settings.editor.headingNumbers);
   const updateEditor = useSettings((state) => state.update);
   const [query, setQuery] = useState("");
-  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
+  const collapsed = useAppStore((state) => state.outlineCollapsed);
+  const setCollapsed = useAppStore((state) => state.setOutlineCollapsed);
+  const [foldMenu, setFoldMenu] = useState<{ x: number; y: number } | null>(null);
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
   const deferredQuery = useDeferredValue(query);
   const filterActive = deferredQuery.trim().length > 0;
@@ -131,20 +128,26 @@ export function OutlineView() {
   );
   const visibleTree = useMemo(() => filterHeadingTree(tree, deferredQuery), [tree, deferredQuery]);
 
-  const handleToggle = useCallback((key: string) => {
-    setCollapsed((previous) => {
-      const next = new Set(previous);
+  const handleToggle = useCallback(
+    (key: string) => {
+      const next = new Set(useAppStore.getState().outlineCollapsed);
       if (next.has(key)) {
         next.delete(key);
       } else {
         next.add(key);
       }
-      return next;
-    });
-  }, []);
+      setCollapsed(next);
+    },
+    [setCollapsed],
+  );
 
-  const collapseAll = () => setCollapsed(collectCollapsible(tree, new Set()));
+  const collapseAll = () => setCollapsed(collectCollapsedKeys(tree, 1));
   const expandAll = () => setCollapsed(new Set());
+  const foldEntries: MenuEntry[] = FOLD_LEVEL_ENTRIES.map((entry) => ({
+    label: entry.label,
+    hotkey: entry.hotkey,
+    run: () => foldOutlineToLevel(entry.level),
+  }));
 
   const handleSelect = useCallback((node: HeadingNode) => {
     setActiveIndex(node.index);
@@ -195,6 +198,19 @@ export function OutlineView() {
         >
           <ListOrdered size={iconSize.sm} />
         </button>
+        <button
+          type="button"
+          className="dc-icon-button"
+          aria-label="折叠到级别"
+          aria-haspopup="menu"
+          title="折叠到级别：只留一级、二级或三级标题"
+          onClick={(event) => {
+            const rect = event.currentTarget.getBoundingClientRect();
+            setFoldMenu({ x: rect.left, y: rect.bottom });
+          }}
+        >
+          <ListChevronsDownUp size={iconSize.sm} />
+        </button>
         <button type="button" className="dc-icon-button" aria-label="全部折叠" title="全部折叠" onClick={collapseAll}>
           <ChevronsDownUp size={iconSize.sm} />
         </button>
@@ -220,6 +236,7 @@ export function OutlineView() {
       ) : (
         <div className="dc-sidebar-empty">没有匹配的标题。</div>
       )}
+      {foldMenu && <PopupMenu x={foldMenu.x} y={foldMenu.y} entries={foldEntries} onClose={() => setFoldMenu(null)} />}
     </div>
   );
 }

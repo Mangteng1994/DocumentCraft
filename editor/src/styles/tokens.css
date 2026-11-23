@@ -22,6 +22,7 @@
   --dc-color-ink: #222222;                  /* --text-normal */
   --dc-color-ink-muted: #5c5c5c;            /* --text-muted */
   --dc-color-ink-faint: #ababab;            /* --text-faint */
+  --dc-color-heading-folded: var(--dc-color-ink-faint); /* 已收拢的标题及其编号（DC-078） */
   --dc-color-accent: #8a5cf5;               /* --interactive-accent */
   --dc-color-accent-hover: #7c4dee;
   --dc-color-accent-text: #7a4ff0;          /* --text-accent */
@@ -158,6 +159,9 @@
   --dc-size-popover: 420px;
   --dc-size-popover-max-height: 420px;
   --dc-size-table-cell: 18px;
+  --dc-size-table-col-min: 6em;             /* 编辑区表格列的最小宽度，超出版心时表格内横向滚动（DC-080） */
+  --dc-size-fold-toggle: 20px;              /* 标题末尾收拢按钮（DC-078） */
+  --dc-size-image-popover: 360px;           /* 图片路径浮窗宽度（DC-079） */
   --dc-size-hotkey: 140px;
   --dc-size-hex-input: 96px;                 /* 五彩文档大纲配置中 HEX 输入框的宽度 */
   --dc-size-props-label: 88px;               /* 属性窗口左侧名称列的宽度 */

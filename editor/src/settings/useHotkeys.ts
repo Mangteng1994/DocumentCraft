@@ -8,6 +8,7 @@ import { closeTab, saveDocument, switchTab } from "../documentActions";
 import { setHeading, setParagraph, type HeadingLevel } from "../editor/editorCommands";
 import { getEditor } from "../editor/editorHandle";
 import { addSelectionToChat, openQuickAsk, toggleCopilot } from "../features/copilot/actions";
+import { foldOutlineToLevel } from "../sidebar/outlineFold";
 import { useAppStore } from "../store";
 import { matchAction } from "./hotkeys";
 import { ACTIONS, type ActionId } from "./schema";
@@ -40,6 +41,9 @@ function runAction(action: ActionId): void {
   const handlers: Partial<Record<ActionId, () => void>> = {
     paragraph: setParagraph,
     insertTable: () => store.setOverlay({ kind: "insertTable" }),
+    outlineLevel1: () => foldOutlineToLevel(1),
+    outlineLevel2: () => foldOutlineToLevel(2),
+    outlineLevel3: () => foldOutlineToLevel(3),
     save: () => void saveDocument(),
     openSettings: () => store.openSettings(),
     searchWorkspace: () => store.openSearch(),
