@@ -359,10 +359,15 @@ export function routeLink(link: LinkSpec, source: Rect, target: Rect, metrics: R
   return [start, [start[0], end[1]], end];
 }
 
-/** 折线上最长一段的中点，用于放连线文字。 */
+/**
+ * 连线文字的位置：落在最长一段上，且尽量靠近整条折线外接框的中心。
+ * 折线带小折点时最长一段不一定居中，取它的中点会让文字偏向一端，压到相邻面板的边框；
+ * 把中心点投影到这一段上（直线时就是中点），文字就留在两块之间空隙的正中。
+ */
 export function labelAnchor(points: Point[]): Point {
   let best: Point = points[0];
   let bestLength = -1;
+  let bestSegment: [Point, Point] = [points[0], points[points.length - 1]];
   for (let index = 1; index < points.length; index += 1) {
     const [x1, y1] = points[index - 1];
     const [x2, y2] = points[index];
@@ -370,7 +375,22 @@ export function labelAnchor(points: Point[]): Point {
     if (length > bestLength) {
       bestLength = length;
       best = [(x1 + x2) / 2, (y1 + y2) / 2];
+      bestSegment = [points[index - 1], points[index]];
     }
+  }
+  const xs = points.map(([x]) => x);
+  const ys = points.map(([, y]) => y);
+  const center: Point = [(Math.min(...xs) + Math.max(...xs)) / 2, (Math.min(...ys) + Math.max(...ys)) / 2];
+  const [[x1, y1], [x2, y2]] = bestSegment;
+  if (x1 === x2) {
+    const low = Math.min(y1, y2);
+    const high = Math.max(y1, y2);
+    return [x1, Math.min(high, Math.max(low, center[1]))];
+  }
+  if (y1 === y2) {
+    const low = Math.min(x1, x2);
+    const high = Math.max(x1, x2);
+    return [Math.min(high, Math.max(low, center[0])), y1];
   }
   return best;
 }

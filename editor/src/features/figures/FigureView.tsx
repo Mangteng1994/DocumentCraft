@@ -137,8 +137,9 @@ function isVerticalContainer(block: Block): boolean {
 
 /**
  * 找出需要加宽间距的容器：连线两端分属某个纵向容器的不同子块时，该容器的子块之间就是箭头要穿过的空隙。
- * 间距不够时箭头头部压在拐角上，走线算法再怎么调也画不好，所以先把空隙留出来。横向不处理：
- * 宽度是 450pt 版心里最紧的约束，横向的层间箭头由 arrow 组件自带占位。
+ * 间距不够时箭头头部压在拐角上，走线算法再怎么调也画不好，所以先把空隙留出来。
+ * 横向容器同理：用 links 连接同一行里相邻栏时（如阶段栏之间的流程箭头），3pt 的紧凑间距放不下箭头，
+ * 画出来只有贴在面板边框上的一小截。用 arrow 组件连接的行自带占位，不在此列。
  */
 function widenedContainers(spec: FigureSpec): Set<Block> {
   const widened = new Set<Block>();
@@ -155,7 +156,7 @@ function widenedContainers(spec: FigureSpec): Set<Block> {
     }
     const common = from[shared - 1];
     const bothBelow = shared < from.length && shared < to.length;
-    if (common && bothBelow && isVerticalContainer(common)) {
+    if (common && bothBelow && (isVerticalContainer(common) || common.kind === "row")) {
       widened.add(common);
     }
   }
@@ -357,7 +358,7 @@ function BlockView({ block, flex }: { block: Block; flex?: string }) {
     case "row": {
       const weights = block.weights ?? inferredWeights(block);
       let weightIndex = 0;
-      const classes = ["dcf-row", gapClass(block.gap, "normal")];
+      const classes = ["dcf-row", gapClass(effectiveGap(block, block.gap, widened), "normal")];
       const style: CSSProperties = { ...flexStyle(flex) };
       if (block.stretch === false) {
         classes.push("is-center");
@@ -538,11 +539,18 @@ function fitDecisions(root: HTMLElement): void {
   }
 }
 
-/** 卡片内容的自然高度：图标行取最高的一项，纵向排列取各项之和，再加上下内边距。 */
-function naturalCardHeight(card: HTMLElement): number {
-  const style = getComputedStyle(card);
+/**
+ * 盒子内容的自然高度：图标行取最高的一项，纵向排列取各项之和，再加上下内边距。
+ * 带标签的卡片里，文字容器 `.dcf-card-text` 会随卡片被拉高（flex: 1 1 auto），直接取它的高度
+ * 得到的是被撑开后的高度，所以对它递归，取其中文字本身的高度。
+ */
+function contentHeight(box: HTMLElement): number {
+  const style = getComputedStyle(box);
   const padding = parseFloat(style.paddingTop) + parseFloat(style.paddingBottom);
-  const heights = Array.from(card.children, (child) => (child as HTMLElement).offsetHeight);
+  const heights = Array.from(box.children, (child) => {
+    const item = child as HTMLElement;
+    return item.classList.contains("dcf-card-text") ? contentHeight(item) : item.offsetHeight;
+  });
   const rowLayout = style.flexDirection === "row";
   let content = heights.reduce((total, height) => total + height, 0);
   if (rowLayout) {
@@ -551,14 +559,26 @@ function naturalCardHeight(card: HTMLElement): number {
   return content + padding;
 }
 
-/** 卡片是否被撑满成空盒：高度够高，且超过自然高度的 maxStretch 倍。 */
+/** 卡片内容的自然高度。 */
+function naturalCardHeight(card: HTMLElement): number {
+  return contentHeight(card);
+}
+
+/**
+ * 卡片是否被撑满成空盒：高度够高，且超过自然高度的 maxStretch 倍；
+ * 或者多出的空白本身已经很大（超过 maxBlankHeight pt）且至少是自然高度的 blankStretch 倍。
+ */
 function isStretchedCard(card: HTMLElement): boolean {
   const heightPt = card.offsetHeight / figureTokens.pxPerPt;
   if (heightPt < figureTokens.minBlankHeight) {
     return false;
   }
   const naturalHeight = naturalCardHeight(card);
-  return card.offsetHeight > naturalHeight * figureTokens.maxStretch;
+  if (card.offsetHeight > naturalHeight * figureTokens.maxStretch) {
+    return true;
+  }
+  const blankPt = (card.offsetHeight - naturalHeight) / figureTokens.pxPerPt;
+  return blankPt > figureTokens.maxBlankHeight && card.offsetHeight > naturalHeight * figureTokens.blankStretch;
 }
 
 /**

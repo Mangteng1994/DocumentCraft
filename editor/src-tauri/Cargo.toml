@@ -1,6 +1,6 @@
 [package]
 name = "documentcraft-editor"
-version = "0.4.2"
+version = "0.4.3"
 description = "DocumentCraft 阅读编辑器"
 edition = "2021"
 rust-version = "1.89"

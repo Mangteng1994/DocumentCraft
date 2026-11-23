@@ -161,10 +161,38 @@ def _fields(value: object, fields: dict, location: str) -> dict:
     return value
 
 
-class SpecValidator:
-    """逐项检查组件、连线和取证范围内的可见文字。"""
+# 以这些字结尾或开头的可见文字，多半是从句子中间截下的半句（如「属于外部服务的」「后方可外发」）。
+# 每个后缀都带有常见的合法词语作为例外，如「目的」「核对」「合并」「理由」。
+_DANGLING_END = re.compile(r"(的|经|及|和|或|与|并|由|对|以及|并且|或者)$")
+_END_EXCEPTIONS = (
+    "目的", "标的", "神经", "已经", "曾经", "涉及", "波及", "普及", "触及", "参与", "温和", "缓和", "融和",
+    "核对", "比对", "校对", "配对", "成对", "相对", "绝对", "针对性", "反对", "合并", "兼并", "理由", "自由",
+    "经由", "缘由", "事由",
+)
+_DANGLING_START = re.compile(r"^([，、；：,;]|[的及和或与并且而则但等了着]|后方)")
+# 句首用作合法词语的例外，如「等级」「并行」「而后」「但是」不会被判为半句。
+_START_EXCEPTIONS = ("等级", "等待", "等效", "并行", "并发", "并联", "与会", "与否", "和谐", "及时", "及格")
 
-    def __init__(self, evidence: list[dict]):
+
+def fragment_problem(value: str) -> bool:
+    """判断一段可见文字是否像从句子中间截下的半句。"""
+    text = value.strip()
+    if not text:
+        return False
+    if _DANGLING_END.search(text) and not text.endswith(_END_EXCEPTIONS):
+        return True
+    return bool(_DANGLING_START.match(text)) and not text.startswith(_START_EXCEPTIONS)
+
+
+class SpecValidator:
+    """逐项检查组件、连线和取证范围内的可见文字。
+
+    fragments 为真时还会拒绝从句子中间截下的半句文字。只用于模型生成稿的首次校验：
+    半句仍是原文的逐字子串，能通过取证检查，但读起来不通顺。用户手工修改和回插时不检查。
+    """
+
+    def __init__(self, evidence: list[dict], fragments: bool = False):
+        self.fragments = fragments
         self.evidence = [_normalized(item["text"]) for item in evidence]
         self.ids: dict[str, tuple[int, ...]] = {}
         self.blocks = 0
@@ -176,6 +204,13 @@ class SpecValidator:
         if not any(_normalized(value) in excerpt for excerpt in self.evidence):
             raise ConversionError(f"{location}「{value}」在取证段落中找不到逐字原文。")
 
+    def fragment(self, value: str, location: str) -> None:
+        if self.fragments and fragment_problem(value):
+            raise ConversionError(
+                f"{location}「{value}」像是从句子中间截取的半句。请改用取证段落中完整的短语，"
+                "或缩短为意思完整的名词短语，不要在「的」「经」「及」等字后截断。"
+            )
+
     def fields(self, value: dict, fields: dict, location: str) -> None:
         for key, rule in fields.items():
             name = key.rstrip("*")
@@ -185,6 +220,7 @@ class SpecValidator:
             field = f"{location}.{name}"
             if rule.startswith("text:"):
                 self.text(item, int(rule.split(":")[1]), field)
+                self.fragment(item, field)
             elif rule in {"detail", "tags", "labels", "quotes"}:
                 values = [item] if rule == "detail" and isinstance(item, str) else item
                 limits = {"detail": (3, 42), "tags": (3, 12), "labels": (LIMITS["children"] - 1, 12),
@@ -195,6 +231,8 @@ class SpecValidator:
                 for entry in values:
                     if rule != "labels" or entry is not None:
                         self.text(entry, length, field)
+                    if rule in {"detail", "tags"}:
+                        self.fragment(entry, field)
             else:
                 self.scalar(item, rule, field)
 
@@ -286,10 +324,12 @@ class SpecValidator:
             seen.add(key)
 
 
-def validate_spec(value: object, evidence: list[dict], title: str, width: float) -> dict:
-    """校验模型或用户的图规格，图题与宽度由程序注入。"""
+def validate_spec(
+    value: object, evidence: list[dict], title: str, width: float, fragments: bool = False,
+) -> dict:
+    """校验模型或用户的图规格，图题与宽度由程序注入。fragments 见 SpecValidator。"""
     spec = _fields(value, {"root*": "", "links": "", "title": "", "width": ""}, "图规格")
-    validator = SpecValidator(evidence)
+    validator = SpecValidator(evidence, fragments)
     validator.block(spec["root"])
     validator.links(spec.get("links", []))
     if validator.leaves < 2:
@@ -310,7 +350,8 @@ def _generate(settings: AISettings, context: dict, title: str, width: float) -> 
     for attempt in range(2):
         try:
             spec = request_json(settings, instructions, context)
-            return validate_spec(spec, context["evidence"], title, width)
+            # 半句检查只在首次尝试时启用：重试仍有半句时接受它，避免多一道硬规则丢掉整张图。
+            return validate_spec(spec, context["evidence"], title, width, fragments=attempt == 0)
         except (ConversionError, TimeoutError) as error:
             if attempt == 1:
                 raise
@@ -367,6 +408,29 @@ def _context(diagram: dict, blocks: list[ReportBlock], width: float, height: flo
     }
 
 
+def _review(settings: AISettings, context: dict, png: str, title: str, width: float) -> dict:
+    """视觉复核一张图。复核模型改写出的规格校验不过（文字不是原文逐字、字段不符、JSON 无效）时，
+    带着具体原因让它改一次，而不是直接放弃复核；第二次仍不过才抛出，调用方保留当前预览。
+    复核模型常把文字改写得更顺口，但图内文字必须逐字摘自取证段落，所以重试反馈里说明这一点。
+    """
+    instructions = _spec_instructions("视觉复核")
+    for attempt in range(2):
+        try:
+            response = request_json(settings, instructions, context, image=png)
+            if response.get("status") == "pass":
+                return {"status": "pass"}
+            reason = response.get("reason")
+            if response.get("status") != "revise" or not isinstance(reason, str) or not reason.strip():
+                raise ConversionError("视觉复核没有返回有效的结论。")
+            spec = validate_spec(response.get("spec"), context["evidence"], title, width)
+            return {"status": "revise", "spec": spec, "reason": reason[:300]}
+        except (ConversionError, TimeoutError) as error:
+            if attempt == 1:
+                raise
+            context = {**context, "validation_error": f"{error} 复核修订稿里的文字必须逐字摘自取证段落，只调整结构和版面，不要改写措辞。"}
+    raise AssertionError("视觉复核重试循环未返回。")
+
+
 def refine_figure(source: Path, settings: AISettings | None, action: str, payload: dict) -> dict:
     """按原始图位校验手动修改、重新生成或视觉复核单张图。"""
     source = source.resolve(strict=True)
@@ -396,14 +460,7 @@ def refine_figure(source: Path, settings: AISettings | None, action: str, payloa
         png = payload.get("png")
         _png_bytes(png, width, height)
         model = _stage_model(settings, payload, "reviewModel")
-        response = request_json(model, _spec_instructions("视觉复核"), context, image=png)
-        if response.get("status") == "pass":
-            return {"status": "pass"}
-        reason = response.get("reason")
-        if response.get("status") != "revise" or not isinstance(reason, str) or not reason.strip():
-            raise ConversionError("视觉复核没有返回有效的结论。")
-        spec = validate_spec(response.get("spec"), context["evidence"], title, width)
-        return {"status": "revise", "spec": spec, "reason": reason[:300]}
+        return _review(model, context, png, title, width)
     feedback = payload.get("feedback")
     if isinstance(feedback, str) and feedback.strip():
         context["layout_feedback"] = feedback[:1200]
