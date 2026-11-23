@@ -11,6 +11,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { ask } from "@tauri-apps/plugin-dialog";
 import { MarkdownEditor } from "./editor/MarkdownEditor";
 import { EditorContextMenu } from "./editor/EditorContextMenu";
+import { ImagePathPopover } from "./editor/ImagePathPopover";
 import { InsertTablePicker } from "./editor/InsertTablePicker";
 import { Sidebar } from "./sidebar/Sidebar";
 import { CommentsPanel } from "./features/comments/CommentsPanel";
@@ -226,6 +227,7 @@ export function App() {
       </footer>
 
       <EditorContextMenu />
+      <ImagePathPopover />
       <ActiveOverlay overlay={overlay} />
     </div>
   );

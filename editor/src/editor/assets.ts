@@ -59,6 +59,29 @@ export function absoluteLocalPath(source: string): string | null {
   return null;
 }
 
+/** 图片引用的位置说明（DC-079）：本地图片带绝对路径，网络地址与 data URI 不是本地文件。 */
+export interface ImageLocation {
+  kind: "local" | "remote";
+  /** 本地图片的绝对路径；相对路径但还没有打开文档时为 null。 */
+  absolute: string | null;
+}
+
+/** 解析图片引用指向的位置，规则与 resolveImageSource 一致：相对路径以当前文档所在目录为基准。 */
+export function describeImageSource(source: string): ImageLocation {
+  if (/^(https?:|data:|blob:|asset:)/i.test(source)) {
+    return { kind: "remote", absolute: null };
+  }
+  const absolute = absoluteLocalPath(source);
+  if (absolute) {
+    return { kind: "local", absolute };
+  }
+  if (!documentDirectory) {
+    return { kind: "local", absolute: null };
+  }
+  const separator = documentDirectory.endsWith("\\") ? "" : "\\";
+  return { kind: "local", absolute: `${documentDirectory}${separator}${decoded(source).replaceAll("/", "\\")}` };
+}
+
 export function resolveImageSource(source: unknown): string {
   if (typeof source !== "string" || !source) {
     return "";
