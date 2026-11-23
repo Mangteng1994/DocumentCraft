@@ -197,28 +197,88 @@ def stream_chat(settings: AISettings, system: str, messages: list[dict]) -> Iter
     raise ConversionError("请先选择 AI 连接方式。")
 
 
-def _load_json_object(response: str) -> object:
-    """解析模型返回的 JSON；整段解析失败时，取第一个「{」到最后一个「}」之间的部分再试一次。
+def _repair_json(text: str) -> str:
+    """修复模型常见的两类 JSON 语法错误：字符串内未转义的英文双引号，以及对象或数组末尾多出的逗号。
 
-    模型有时在 JSON 前后附带说明文字。只在整段解析失败后才截取，不改变正常返回的处理。
+    逐字符扫描并记录是否在字符串内。字符串内遇到双引号时，看它后面第一个非空白字符：
+    是逗号、冒号、右括号才当作字符串结束，否则当作文字中的引号补上转义（如 视频说明"正在做什么"）。
+    只在整段解析失败后才调用，不改变正常返回的处理。
+    """
+    out: list[str] = []
+    in_string = False
+    index = 0
+    size = len(text)
+    while index < size:
+        char = text[index]
+        if in_string:
+            if char == "\\" and index + 1 < size:
+                out.append(char)
+                out.append(text[index + 1])
+                index += 2
+                continue
+            if char == '"':
+                rest = text[index + 1:].lstrip()
+                if not rest or rest[0] in ',:}]':
+                    in_string = False
+                    out.append(char)
+                else:
+                    out.append('\\"')
+                index += 1
+                continue
+            out.append(char)
+            index += 1
+            continue
+        if char == '"':
+            in_string = True
+        elif char == ",":
+            rest = text[index + 1:].lstrip()
+            if rest and rest[0] in "}]":
+                index += 1
+                continue
+        out.append(char)
+        index += 1
+    return "".join(out)
+
+
+def _load_json_object(response: str) -> object:
+    """解析模型返回的 JSON。
+
+    整段解析失败时，依次试：取第一个「{」到最后一个「}」之间的部分（模型有时在 JSON 前后附带说明文字），
+    再对这部分做语法修复（见 _repair_json）。都失败时抛出第一次解析的错误，位置信息才对应原始返回。
+    控制字符（字符串里的原始换行）按宽松模式接受。
     """
     try:
         return json.loads(response)
-    except json.JSONDecodeError:
+    except json.JSONDecodeError as first:
         start = response.find("{")
         end = response.rfind("}")
         if start < 0 or end <= start:
             raise
-        return json.loads(response[start:end + 1])
+        body = response[start:end + 1]
+        for candidate in (body, _repair_json(body)):
+            try:
+                return json.loads(candidate, strict=False)
+            except json.JSONDecodeError:
+                continue
+        raise first
 
 
-def _invalid_json_message(response: object) -> str:
-    """说明无效 JSON 的特征，区分输出被截断、为空和带说明文字，方便判断是模型还是服务的问题。"""
+def _invalid_json_message(response: object, error: Exception | None = None) -> str:
+    """说明无效 JSON 的特征：为空、被截断，或语法错误的位置和附近文字，方便判断是模型还是服务的问题。
+
+    错误位置附近的文字也会进入模型重试时收到的反馈，让它知道改哪里。
+    """
     if not isinstance(response, str) or not response.strip():
         return "分析服务没有返回有效的 JSON（返回为空）。"
     text = response.rstrip()
     if not text.endswith(("}", "```")):
         return f"分析服务没有返回有效的 JSON（共 {len(text)} 字符，末尾不完整，可能被截断）。"
+    if isinstance(error, json.JSONDecodeError):
+        near = text[max(0, error.pos - 12):error.pos + 12].replace("\n", " ")
+        return (
+            f"分析服务没有返回有效的 JSON（共 {len(text)} 字符）：{error.msg}，第 {error.lineno} 行第 {error.colno} 列，"
+            f"附近为「{near}」。若是字符串里的英文双引号，须写成 \\\" 或改用中文引号；也检查相邻项之间是否漏了逗号。"
+        )
     return f"分析服务没有返回有效的 JSON（共 {len(text)} 字符）。"
 
 
@@ -249,7 +309,7 @@ def request_json(settings: AISettings, instructions: str, payload: object, *, im
                 response = fenced.group(1)
         result = _load_json_object(response)
     except (json.JSONDecodeError, TypeError) as error:
-        raise ConversionError(_invalid_json_message(response)) from error
+        raise ConversionError(_invalid_json_message(response, error)) from error
     if not isinstance(result, dict):
         raise ConversionError("分析结果必须为 JSON 对象。")
     return result

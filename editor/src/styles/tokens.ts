@@ -105,6 +105,12 @@ export const figureTokens = {
   maxStackedChain: 5,
   /** 卡片被撑满后高度超过自然高度的这个倍数（4 倍，样张里刻意撑满的等高卡片在 3.6 倍以内），视为空盒，改为自然高度加均匀空隙。 */
   maxStretch: 4,
+  /**
+   * 卡片被拉高的空白超过这个高度（pt）且达到 blankStretch 倍时，不论是否到 maxStretch 倍都视为空盒。
+   * 样张里刻意撑满的等高卡片空白不超过 133pt；真实运行里单卡阶段栏被邻栏拉出 200pt 以上的空白。
+   */
+  maxBlankHeight: 150,
+  blankStretch: 2,
   /** 连线折线中间段短于这个长度（pt）呈现为小钩，走线时视为不可用。 */
   minJog: 3,
   bold: 700,
