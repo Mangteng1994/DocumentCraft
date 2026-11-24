@@ -240,7 +240,19 @@ textarea {
 }
 
 .dc-statusbar-message {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.dc-statusbar-word-count {
+  display: flex;
   flex-shrink: 0;
+  align-items: center;
+  gap: var(--dc-space-lg);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 
 /* 状态栏更新提示（DC-063）：只在有新版本时出现，用强调色与普通状态文字区分 */
@@ -537,6 +549,20 @@ textarea {
 .dc-tree > .dc-tree-create,
 .dc-tree > .dc-tree-note {
   flex-shrink: 0;
+}
+
+/* 增加定位按钮后，窄侧栏允许工具栏换行，保证全部操作都能看到。 */
+.dc-tree > .dc-sidebar-header {
+  flex-wrap: wrap;
+}
+
+.dc-tree .dc-sidebar-title,
+.dc-tree .dc-sidebar-actions {
+  max-width: var(--dc-size-tree-header-content-max);
+}
+
+.dc-tree .dc-sidebar-actions {
+  flex-wrap: wrap;
 }
 
 /* 按需加载（DC-060）：模式说明、读取中和条目过多的提示。 */

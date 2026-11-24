@@ -30,6 +30,7 @@ import { PaneResizer, paneWidthStyle } from "./components/PaneResizer";
 import { RecentWorkspaces } from "./components/RecentWorkspaces";
 import { listenSearchIndex } from "./sidebar/searchIndex";
 import { WorkspaceSwitcher } from "./components/WorkspaceSwitcher";
+import { WordCountStatus } from "./components/WordCountStatus";
 import { UpdateBadge } from "./features/updater/UpdateBadge";
 import { useAutoUpdate } from "./features/updater/useAutoUpdate";
 import { chooseFile, chooseWorkspace } from "./documentActions";
@@ -223,7 +224,8 @@ export function App() {
           {filePath ?? "未打开文档"}
         </span>
         <UpdateBadge />
-        <span className="dc-statusbar-message">{dirty ? "未保存" : status}</span>
+        <span className="dc-statusbar-message" title={dirty ? "未保存" : status}>{dirty ? "未保存" : status}</span>
+        <WordCountStatus />
       </footer>
 
       <EditorContextMenu />
