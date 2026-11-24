@@ -12,6 +12,7 @@ import { parseMarkdown, serializeMarkdown } from "@vmark/utils/markdownPipeline"
 import type { HeadingItem } from "@vmark/utils/markdownOutline";
 import { detectLinebreaks, type LineEnding } from "@vmark/utils/linebreakDetection";
 import type { MarkdownPipelineOptions } from "@vmark/utils/markdownPipeline/types";
+import { syncWordCounts } from "./wordCount";
 
 // 保留原文中的连续空行，避免仅打开再保存就产生大面积差异。
 const PIPELINE_OPTIONS = { preserveBlankLines: true };
@@ -56,6 +57,7 @@ export function loadMarkdown(markdown: string): void {
   const normalizing = created.tr.setMeta("addToHistory", false);
   const { state } = created.applyTransaction(normalizing);
   editor.view.updateState(state);
+  syncWordCounts(editor);
   markClean();
 }
 
@@ -97,6 +99,7 @@ export function restoreDocument(snapshot: DocumentSnapshot): void {
   documentOptions = snapshot.options;
   cleanMarkdown = snapshot.clean;
   editor.view.updateState(snapshot.state);
+  syncWordCounts(editor);
   const container = scrollContainer();
   if (container) {
     container.scrollTop = snapshot.scrollTop;

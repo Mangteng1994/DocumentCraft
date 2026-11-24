@@ -93,6 +93,9 @@ export interface AppState {
   outlineCollapsed: Set<string>;
   /** 文档内容每次变化后递增，供批注面板刷新定位状态。 */
   docVersion: number;
+  /** 当前正文及选区中的非空白字符数（DC-083）。 */
+  documentCharCount: number;
+  selectionCharCount: number;
   notes: Note[];
   activeNoteId: string | null;
   sidebarView: SidebarView;
@@ -132,6 +135,7 @@ export interface AppState {
   setHeadings: (headings: HeadingItem[]) => void;
   setOutlineCollapsed: (collapsed: Set<string>) => void;
   bumpDocVersion: () => void;
+  setWordCounts: (total: number, selected: number) => void;
   setNotes: (notes: Note[]) => void;
   setActiveNoteId: (id: string | null) => void;
   setSidebarView: (view: SidebarView) => void;
@@ -160,6 +164,8 @@ export const useAppStore = create<AppState>((set) => ({
   headings: [],
   outlineCollapsed: new Set<string>(),
   docVersion: 0,
+  documentCharCount: 0,
+  selectionCharCount: 0,
   notes: [],
   activeNoteId: null,
   sidebarView: "files",
@@ -205,6 +211,13 @@ export const useAppStore = create<AppState>((set) => ({
   setHeadings: (headings) => set({ headings }),
   setOutlineCollapsed: (outlineCollapsed) => set({ outlineCollapsed }),
   bumpDocVersion: () => set((state) => ({ docVersion: state.docVersion + 1 })),
+  setWordCounts: (documentCharCount, selectionCharCount) =>
+    set((state) => {
+      if (state.documentCharCount === documentCharCount && state.selectionCharCount === selectionCharCount) {
+        return state;
+      }
+      return { documentCharCount, selectionCharCount };
+    }),
   setNotes: (notes) => set({ notes }),
   setActiveNoteId: (activeNoteId) => set({ activeNoteId }),
   setSidebarView: (sidebarView) => set({ sidebarView }),

@@ -13,8 +13,8 @@
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { ArrowUpDown, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, File, FilePlus, FileText, Folder, FolderOpen, FolderPlus, RefreshCw } from "lucide-react";
-import type { TreeNode } from "../backend";
+import { ArrowUpDown, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, File, FilePlus, FileText, Folder, FolderOpen, FolderPlus, LocateFixed, RefreshCw } from "lucide-react";
+import { errorText, listDir, type TreeNode } from "../backend";
 import {
   chooseWorkspace,
   copyEntryToClipboard,
@@ -24,6 +24,7 @@ import {
   isInside,
   loadFolder,
   openDocument,
+  openWorkspace,
   openWithSystem,
   pasteEntry,
   refreshTree,
@@ -94,8 +95,13 @@ function collectUnloadedExpanded(node: TreeNode, expanded: Set<string>, result: 
   return result;
 }
 
+/** 树路径比较兼容 Windows 大小写、两种路径分隔符及末尾分隔符。 */
+function normalizeTreePath(path: string): string {
+  return path.replaceAll("/", "\\").replace(/[\\]+$/, "").toLowerCase();
+}
+
 function samePath(left: string, right: string): boolean {
-  return isInside(left, right) && isInside(right, left);
+  return normalizeTreePath(left) === normalizeTreePath(right);
 }
 
 /**
@@ -238,7 +244,7 @@ const TreeRow = memo(function TreeRow(props: RowProps) {
   const sortDescending = useSettings((state) => state.settings.files.sortDescending);
   const sortedChildren = useMemo(() => sortNodes(node.children, sortKey, sortDescending), [node.children, sortKey, sortDescending]);
   const isOpen = expanded.has(node.path);
-  const isActive = node.path === activePath;
+  const isActive = activePath !== null && samePath(node.path, activePath);
   const isTarget = node.is_dir && node.path === selectedDir;
   const isDrop = node.is_dir && dropDir !== null && samePath(node.path, dropDir);
   const isMenuTarget = menuPath !== null && node.path === menuPath;
@@ -416,6 +422,10 @@ export function FileTree() {
   const tree = useAppStore((state) => state.tree);
   const filePath = useAppStore((state) => state.filePath);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
+  const [locating, setLocating] = useState(false);
+  const [revealTarget, setRevealTarget] = useState<{ path: string; root: string } | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const locateGeneration = useRef(0);
   // 新建条目所在的文件夹：最近点击的文件夹，未点击时为工作区根目录。
   const [selectedDir, setSelectedDir] = useState<string | null>(null);
   const [creating, setCreating] = useState<CreateKind | null>(null);
@@ -437,6 +447,101 @@ export function FileTree() {
   // 拖动和外部拖入的监听函数是长期存在的，用 ref 读到最新的目录树。
   const treeRef = useRef(tree);
   treeRef.current = tree;
+
+  useEffect(() => {
+    return () => {
+      // 视图卸载后，尚在读取的定位任务不得再展开或聚焦旧文件树。
+      locateGeneration.current += 1;
+    };
+  }, []);
+
+  // 先提交展开状态，等文件行进入 DOM 后再滚动；只在用户点击定位按钮时执行。
+  useEffect(() => {
+    if (!revealTarget || !tree || !filePath) {
+      return;
+    }
+    if (!samePath(filePath, revealTarget.path) || !samePath(tree.path, revealTarget.root)) {
+      setRevealTarget(null);
+      return;
+    }
+    const rows = containerRef.current?.querySelectorAll<HTMLElement>("[data-tree-path]");
+    const row = Array.from(rows ?? []).find((element) => samePath(element.dataset.treePath ?? "", revealTarget.path));
+    if (row) {
+      row.scrollIntoView({ block: "center", inline: "nearest" });
+      row.focus({ preventScroll: true });
+      setRevealTarget(null);
+    }
+  }, [revealTarget, tree, filePath, expanded]);
+
+  /** 定位活跃文件：逐级读取所需父目录，再一次展开并滚动，不遍历整个工作区。 */
+  const revealActiveFile = async (): Promise<void> => {
+    const store = useAppStore.getState();
+    const path = store.filePath;
+    if (!path) {
+      return;
+    }
+    const generation = ++locateGeneration.current;
+    const active = () => locateGeneration.current === generation && useAppStore.getState().filePath === path;
+    setLocating(true);
+    try {
+      let root = store.tree;
+      // 页签可跨工作区保留；定位工作区外的页签时打开它的所在目录。
+      if (!root || !isInside(normalizeTreePath(path), normalizeTreePath(root.path))) {
+        await openWorkspace(parentDirectory(path));
+        if (!active()) {
+          return;
+        }
+        root = useAppStore.getState().tree;
+      }
+      if (!root || !isInside(normalizeTreePath(path), normalizeTreePath(root.path))) {
+        return;
+      }
+      const rootPath = root.path;
+      const current = () => {
+        const latestRoot = useAppStore.getState().tree;
+        return active() && latestRoot !== null && samePath(latestRoot.path, rootPath);
+      };
+      const ancestors: string[] = [];
+      let directory: TreeNode = root;
+      while (current()) {
+        if (!directory.loaded) {
+          const showAll = useSettings.getState().settings.files.showAllFiles;
+          const loaded = await listDir(directory.path, showAll);
+          if (!current()) {
+            return;
+          }
+          store.mergeTreeNode(loaded);
+          directory = loaded;
+        }
+        const child: TreeNode | undefined = directory.children.find((entry) => {
+          if (samePath(entry.path, path)) {
+            return true;
+          }
+          return entry.is_dir && isInside(normalizeTreePath(path), normalizeTreePath(entry.path));
+        });
+        if (!child) {
+          store.setStatus("无法定位当前文件：目录树中未列出该文件或其父目录，请刷新目录；隐藏目录或条目截断也可能导致无法定位。");
+          return;
+        }
+        if (!child.is_dir) {
+          setExpanded((previous) => new Set([...previous, ...ancestors]));
+          setSelectedDir(directory.path);
+          setRevealTarget({ path: child.path, root: rootPath });
+          return;
+        }
+        ancestors.push(child.path);
+        directory = child;
+      }
+    } catch (error) {
+      if (active()) {
+        store.setStatus(`无法定位当前文件：${errorText(error)}`);
+      }
+    } finally {
+      if (locateGeneration.current === generation) {
+        setLocating(false);
+      }
+    }
+  };
 
   // 按需加载：展开了还没读取子项的文件夹时去读取；刷新目录树后展开的文件夹也会重新读取。
   useEffect(() => {
@@ -735,6 +840,7 @@ export function FileTree() {
 
   return (
     <div
+      ref={containerRef}
       className={containerClass}
       onContextMenu={(event) => {
         event.preventDefault();
@@ -746,6 +852,16 @@ export function FileTree() {
           {tree.name}
         </span>
         <div className="dc-sidebar-actions">
+          <button
+            type="button"
+            className="dc-icon-button"
+            aria-label="定位当前文件"
+            title={locating ? "正在定位当前文件…" : "定位当前文件"}
+            disabled={!filePath || locating}
+            onClick={() => void revealActiveFile()}
+          >
+            <LocateFixed size={iconSize.sm} />
+          </button>
           <button type="button" className="dc-icon-button" aria-label="新建 Markdown" title="新建 Markdown" onClick={() => startCreate("note")}>
             <FilePlus size={iconSize.sm} />
           </button>

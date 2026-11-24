@@ -9,6 +9,7 @@ import { differsFromClean, extractDocumentHeadings, getEditor, setEditor } from 
 import { selectNote } from "../documentActions";
 import { captureEditorSelection } from "../features/copilot/actions";
 import { useAppStore } from "../store";
+import { syncWordCounts } from "./wordCount";
 
 // 大纲在输入停顿后再刷新，长文档连续输入时不逐键重建。
 const OUTLINE_DELAY_MS = 150;
@@ -66,6 +67,9 @@ export function MarkdownEditor() {
       selectionTimer.current = window.setTimeout(captureEditorSelection, SELECTION_DELAY_MS);
     },
     onTransaction: ({ editor: changed, transaction }) => {
+      if (transaction.docChanged || transaction.selectionSet) {
+        syncWordCounts(changed);
+      }
       if (!transaction.docChanged) {
         return;
       }
@@ -105,6 +109,7 @@ export function MarkdownEditor() {
       return;
     }
     const store = useAppStore.getState();
+    syncWordCounts(editor);
     store.setHeadings(extractDocumentHeadings(editor));
     store.bumpDocVersion();
   }, [editor, filePath]);

@@ -155,6 +155,7 @@
   --dc-size-input-area: 96px;
   --dc-size-composer-max: 220px;
   --dc-size-tree-row: 26px;
+  --dc-size-tree-header-content-max: 100%; /* 窄侧栏的文件名与工具栏限制在头部可用宽度内 */
   --dc-size-menu: 220px;
   --dc-size-popover: 420px;
   --dc-size-popover-max-height: 420px;
