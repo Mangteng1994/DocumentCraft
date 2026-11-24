@@ -77,7 +77,8 @@
 | DC-079 | 图片路径浮窗 | 在编辑区点击图片，图片下方弹出浮窗，显示 Markdown 中的原路径与解析后的绝对路径（网络地址只显示地址）；提供「复制路径」「打开所在文件夹」（网络地址不提供后者）；找不到的图片同样显示路径便于排查；按 Esc、点击浮窗外、编辑区滚动、文档内容变化或切换文档时关闭，不影响图片拖拽。编辑路径（思源支持）列为 Should，本轮不做 | 已实现；浏览器（模拟 IPC）手动检查通过：缺图显示相对路径、本地位置和提示且「打开所在文件夹」置灰，内嵌图只显示复制，Esc 关闭，未做原生窗口验收（复制到剪贴板与资源管理器定位依赖 Tauri 原生接口，未试） · `editor/src/editor/ImagePathPopover.tsx`、`MarkdownEditor.tsx`、`assets.ts`、`editor/src/store.ts` |
 | DC-080 | 编辑区表格横向滚动 | 列多或内容长的表格不再被压成窄列逐字折行，而是保持列的最小宽度并在表格内出现横向滚动条；列最小宽度为令牌 `--dc-size-table-col-min`。原因：此前 `word-break: break-word` 把单元格最小宽度压到一个字符，表格永远不会超出版心，滚动条不出现 | 已实现；浏览器手动检查通过：9 列长文本表格在 697 像素版心内 scrollWidth 995 出现横向滚动条，旧样式下 scrollWidth 等于 clientWidth（697）无法滚动 · `editor/src/styles/app.css`、`tokens.css` |
 | DC-082 | 定位当前文档 | 文件树头部新增「定位当前文件」按钮；点击展开当前活跃文档的各级父文件夹并滚动到文件行，支持按需加载；文档位于其他工作区时切换到其所在目录；无文档时按钮置灰 | 已实现，未测试（用户未要求） · Must；`editor/src/sidebar/FileTree.tsx`、`editor/src/styles/app.css`、`tokens.css`；按路径逐级读取，切换文档或工作区后停止旧定位；隐藏目录、文件已不存在或目录列表被截断而未包含目标时提示原因，窄侧栏工具栏可换行 |
-| DC-083 | 当前文档与选区字数 | 整个窗口右下角显示活跃 Markdown 正文与选区字数；编辑、撤销、选区变化、切换页签后同步更新；统计文本中的非空白 Unicode 字符（含标点），不计 Markdown 格式标记、图片和只读原子节点；未打开文档时隐藏 | 已实现，未测试（用户未要求） · Must；`editor/src/editor/wordCount.ts`、`MarkdownEditor.tsx`、`editorHandle.ts`、`editor/src/store.ts`、`components/WordCountStatus.tsx`、`App.tsx`、`styles/app.css`；缓存未改变节点的字数，表格多单元格选区逐段统计，使用已有设计令牌 |
+| DC-083 | 当前文档与选区字数 | 整个窗口右下角显示活跃 Markdown 正文与选区字数；编辑、撤销、选区变化、切换页签后同步更新；统计文本中的非空白 Unicode 字符（含标点），不计 Markdown 格式标记、图片和只读原子节点；全文和选区达到 1 万字时按「万＋余数」显示（如 254032 → 25万4032、10000 → 1万），不足 1 万直接显示整数；未打开文档时隐藏 | 已实现，未测试（用户未要求） · Must；`editor/src/editor/wordCount.ts`、`MarkdownEditor.tsx`、`editorHandle.ts`、`editor/src/store.ts`、`components/WordCountStatus.tsx`、`App.tsx`、`styles/app.css`；缓存未改变节点的字数，表格多单元格选区逐段统计，使用已有设计令牌 |
+| DC-084 | Markdown 转 Word 表格所有框线 | 样式模板与完整模板模式导出的 Markdown 表格均显示全部外框及内部横竖线，采用黑色 0.5 磅单实线；覆盖生成表格及单元格的无边框设置，完整模板原有表格保持原样 | 已实现并打包 0.4.5，未测试（用户未要求） · Must；`core/src/documentcraft/templates.py` 的 `apply_generated_table_borders`，在 `apply_template_styles` 中对生成内容统一处理；表格级和单元格级显式边框覆盖无框线，保存分支同步生效 |
 
 ## Should
 
@@ -323,3 +324,14 @@ foreach ($step in 'save','reopen','style','full','skip','plain') {
 - 处理：扫描上限提高到 100 万个文件，单文件夹扫描上限提高到 20 万条，超出时把列表标记为不完整；后端 `SearchResult` 新增 `scan_incomplete`，界面在无匹配和有结果时都提示「文件太多，只扫描了前 N 个文件，其余文件夹没有参与搜索」。实现：`src-tauri/src/workspace.rs`、`editor/src/backend.ts`、`SearchView.tsx`。
 - 验收：Rust 测试通过（Linux 下用 tauri 替身编译 `extract.rs`、`textindex.rs`、`workspace.rs`，24 项通过，含新增的切换工作区释放测试；临时复现 32 万文件、目标在靠后文件夹：30 万上限找不到，100 万上限找到）；`tsc --noEmit` 通过。未测试：Tauri 完整构建与界面、真实共享、单文件夹超 20 万条。若该共享超过 100 万文件仍会截断，需缩小工作区到子文件夹。
 - 内存释放：`SearchIndex::begin` 在切换到新工作区开始准备搜索时，丢弃其他工作区的文件列表和文档文本（正在建立索引的除外；文档文本有磁盘缓存，切回后增量恢复）。此前它们要到退出应用才释放。状态：已实现，单元测试通过（`switching_workspace_releases_other_roots_but_not_running_ones`），界面未测试。
+
+## 2026-11-24 0.4.5 本地试用包（DC-038、DC-082、DC-083、DC-084）
+
+- 范围：包含当前文件定位、正文与选区字数统计及万位显示、Word 表格所有框线，版本号及 npm、Cargo 锁文件同步到 0.4.5。
+- 状态：已打包。Python sidecar 已按当前源码重建，补齐 pyoxipng、MozJPEG 与 ffmpeg；MSVC Release 编译和 NSIS 打包成功。本机未配置更新签名私钥，仅在此次构建配置中关闭更新签名产物，应用更新公钥与正式打包流程不变。
+- 构建结果：`editor/src-tauri/target/release/bundle/nsis/DocumentCraft_0.4.5_x64-setup.exe`（117.40 MiB）；编译产物的 FileVersion 与 ProductVersion 均为 0.4.5，sidecar 与随包资源副本的 SHA-256 一致；构建信息保存在 `out/release/build-0.4.5.json`。
+- 验收：构建所需的 TypeScript 检查通过；未运行测试，未安装或启动应用，功能由用户试用；未发布 GitHub Release。
+
+- DC-083 显示修订：全文与选区字数统一采用「万＋余数」，不做小数舍入；已实现并重新打包 0.4.5，构建自带的 TypeScript 检查与 MSVC、NSIS 构建通过；未运行功能测试。
+
+- DC-084 修订：Markdown 表格导出统一设置所有外框与内部横竖线，黑色 0.5 磅单实线。已重建 sidecar 并重新打包 0.4.5；随包 sidecar 与新构建副本的 SHA-256 一致，构建信息已更新；未执行转换测试及 Word/WPS 打开验收。

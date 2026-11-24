@@ -12,12 +12,17 @@ from docx.opc.packuri import PackURI
 from docx.opc.part import Part
 from docx.oxml import OxmlElement, parse_xml
 from docx.oxml.ns import qn
+from docx.oxml.table import CT_TblPr, CT_TcPr
 from docxcompose.composer import Composer
 from lxml.etree import _Element
 
 BOOKMARK = "DOCFLOW_CONTENT"
 PLACEHOLDER = "{{DOCFLOW_CONTENT}}"
 RESOURCE_ATTRIBUTES = tuple(qn(name) for name in ("r:id", "r:embed", "r:link"))
+TABLE_BORDER_EDGES = ("top", "left", "bottom", "right", "insideH", "insideV")
+CELL_BORDER_EDGES = ("top", "left", "bottom", "right")
+# OOXML 的边框宽度按八分之一磅计，4 即 0.5 磅。
+TABLE_BORDER_ATTRIBUTES = {"val": "single", "sz": "4", "space": "0", "color": "000000"}
 # Pandoc 的默认角色找不到同名样式时，优先使用模板中等价的中文样式。
 STYLE_ALIASES = {
     "Title": ("Title", "题目"),
@@ -40,8 +45,55 @@ def has_toc_placeholder(template: Document) -> bool:
     return any(value.casefold() == "table of contents" for value in galleries)
 
 
+def _set_grid_borders(
+    properties: CT_TblPr | CT_TcPr,
+    tag: str,
+    edges: tuple[str, ...],
+    successors: tuple[str, ...],
+) -> None:
+    """按属性顺序写入实线边框，替换已有的无框线及主题边框设置。"""
+    for previous in list(properties.findall(qn(tag))):
+        properties.remove(previous)
+    borders = OxmlElement(tag)
+    for edge in edges:
+        border = OxmlElement(f"w:{edge}")
+        for name, value in TABLE_BORDER_ATTRIBUTES.items():
+            border.set(qn(f"w:{name}"), value)
+        borders.append(border)
+    properties.insert_element_before(borders, *successors)
+
+
+def apply_generated_table_borders(content: Document) -> bool:
+    """为 Markdown 生成的所有表格设置所有框线，包含嵌套表格。"""
+    tables = content.element.body.xpath(".//w:tbl")
+    for table in tables:
+        _set_grid_borders(
+            table.tblPr,
+            "w:tblBorders",
+            TABLE_BORDER_EDGES,
+            (
+                "w:shd", "w:tblLayout", "w:tblCellMar", "w:tblLook",
+                "w:tblCaption", "w:tblDescription", "w:tblPrChange",
+            ),
+        )
+        # 单元格的 nil/none 边框可覆盖整表边框，需一并显式设置四边。
+        # 只处理生成内容，完整模板原有的封面和版式表格不进入此函数。
+        for cell in table.xpath("./w:tr/w:tc"):
+            _set_grid_borders(
+                cell.get_or_add_tcPr(),
+                "w:tcBorders",
+                CELL_BORDER_EDGES,
+                (
+                    "w:shd", "w:noWrap", "w:tcMar", "w:textDirection",
+                    "w:tcFitText", "w:vAlign", "w:hideMark", "w:headers",
+                    "w:cellIns", "w:cellDel", "w:cellMerge", "w:tcPrChange",
+                ),
+            )
+    return bool(tables)
+
+
 def apply_template_styles(template: Document, content: Document) -> bool:
-    """应用模板段落角色，并为未定义对齐的生成表格设置默认值。"""
+    """应用模板段落角色，为生成表格设置所有框线及默认对齐。"""
     paragraph_styles = {
         style.name: style.style_id
         for style in template.styles if style.type == WD_STYLE_TYPE.PARAGRAPH
@@ -54,7 +106,7 @@ def apply_template_styles(template: Document, content: Document) -> bool:
             body_style_ids.add(paragraph_styles[name])
     cell_style = paragraph_styles.get("表格文字")
     body = content.element.body
-    changed = False
+    changed = apply_generated_table_borders(content)
     for table in content.tables:
         if table.alignment is not None:
             continue
