@@ -3,6 +3,7 @@
  */
 
 import { useEffect, useRef } from "react";
+import type { Editor } from "@tiptap/core";
 import { EditorContent, useEditor } from "@tiptap/react";
 import { createExtensions } from "./extensions";
 import { differsFromClean, extractDocumentHeadings, getEditor, setEditor } from "./editorHandle";
@@ -20,7 +21,18 @@ const SELECTION_DELAY_MS = 250;
 export function MarkdownEditor() {
   const filePath = useAppStore((state) => state.filePath);
   const outlineTimer = useRef<number | undefined>(undefined);
+  const outlinedDocument = useRef<Editor["state"]["doc"] | null>(null);
   const selectionTimer = useRef<number | undefined>(undefined);
+
+  /** 用当前文档内容和同一份选区刷新大纲，避免用旧标题位置判断新正文。 */
+  function refreshOutline(editor: Editor, position = editor.state.selection.head): void {
+    window.clearTimeout(outlineTimer.current);
+    outlineTimer.current = undefined;
+    outlinedDocument.current = editor.state.doc;
+    const store = useAppStore.getState();
+    store.setHeadings(extractDocumentHeadings(editor), position);
+    store.bumpDocVersion();
+  }
 
   const editor = useEditor({
     extensions: createExtensions(),
@@ -30,7 +42,19 @@ export function MarkdownEditor() {
         spellcheck: "false",
       },
       handleDOMEvents: {
-        click: (_view, event) => {
+        click: (view, event) => {
+          if (event.button === 0) {
+            const clickedPosition = view.posAtCoords({ left: event.clientX, top: event.clientY });
+            const position = clickedPosition?.pos ?? view.state.selection.head;
+            if (outlinedDocument.current !== view.state.doc) {
+              const current = getEditor();
+              if (current?.view === view) {
+                refreshOutline(current, position);
+              }
+            }
+            // 再次点击同一节时，也允许把手动滚离的标题带回可见范围。
+            useAppStore.getState().setOutlinePosition(position, true);
+          }
           const target = event.target as HTMLElement | null;
           // 点击图片：在图片下方显示路径浮窗（DC-079）。路径取自 data-src，即 Markdown 中的原始写法。
           if (target instanceof HTMLImageElement) {
@@ -72,13 +96,15 @@ export function MarkdownEditor() {
         syncWordCounts(changed);
       }
       if (!transaction.docChanged) {
+        // 拖选时让大纲保持稳定，普通光标移动或跳转则跟随。
+        if (transaction.selectionSet && changed.state.selection.empty && outlinedDocument.current === changed.state.doc) {
+          useAppStore.getState().setOutlinePosition(changed.state.selection.head);
+        }
         return;
       }
       window.clearTimeout(outlineTimer.current);
       outlineTimer.current = window.setTimeout(() => {
-        const store = useAppStore.getState();
-        store.setHeadings(extractDocumentHeadings(changed));
-        store.bumpDocVersion();
+        refreshOutline(changed);
       }, OUTLINE_DELAY_MS);
     },
     onUpdate: () => {
@@ -109,10 +135,8 @@ export function MarkdownEditor() {
     if (!editor) {
       return;
     }
-    const store = useAppStore.getState();
     syncWordCounts(editor);
-    store.setHeadings(extractDocumentHeadings(editor));
-    store.bumpDocVersion();
+    refreshOutline(editor);
   }, [editor, filePath]);
 
   useEffect(() => {

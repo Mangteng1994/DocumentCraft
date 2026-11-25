@@ -316,6 +316,15 @@ export function clipboardReadFiles(): Promise<ClipboardFiles> {
   return invoke<ClipboardFiles>("clipboard_read_files");
 }
 
+/** 读取原生剪贴板中的文本和 HTML，菜单粘贴也可读取单独的图片。 */
+export function clipboardReadEditor(includeImage: boolean): Promise<{
+  text: string;
+  html: string;
+  image: { mime: string; bytes: number[] } | null;
+}> {
+  return invoke("clipboard_read_editor", { includeImage });
+}
+
 /** 清空系统剪贴板。 */
 export function clipboardClear(): Promise<void> {
   return invoke<void>("clipboard_clear");

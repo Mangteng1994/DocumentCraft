@@ -7,17 +7,17 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ChevronRight } from "lucide-react";
-import { readText as readClipboard, writeText as writeClipboard } from "@tauri-apps/plugin-clipboard-manager";
+import { writeText as writeClipboard } from "@tauri-apps/plugin-clipboard-manager";
 import { useSettings } from "../settings/settingsStore";
 import type { ActionId } from "../settings/schema";
 import { useAppStore } from "../store";
 import { iconSize } from "../styles/tokens";
 import { useCopilot } from "../features/copilot/copilotStore";
-import { chooseAndInsertImage } from "./imageSupport";
+import { chooseAndInsertImage, pasteFromSystemClipboard } from "./imageSupport";
 import { addSelectionToChat } from "../features/copilot/actions";
 import { anchorFromSelection } from "./annotations";
 import { currentSelection, isInTable, runTableAction, type TableAction } from "./editorCommands";
-import { getEditor, insertMarkdown } from "./editorHandle";
+import { getEditor } from "./editorHandle";
 
 export interface MenuItem {
   label: string;
@@ -148,14 +148,6 @@ export function EditorContextMenu() {
     }
   };
 
-  const paste = async () => {
-    const text = await readClipboard();
-    if (text) {
-      // 粘贴的文字按 Markdown 解析，表格、列表等结构保留。
-      insertMarkdown(text);
-    }
-  };
-
   const addComment = () => {
     if (!editor || !anchorFromSelection(editor.state)) {
       return;
@@ -179,7 +171,7 @@ export function EditorContextMenu() {
   const entries: MenuEntry[] = [
     { label: "剪切", disabled: !hasSelection, run: () => void copySelection(true) },
     { label: "复制", disabled: !hasSelection, run: () => void copySelection(false) },
-    { label: "粘贴", run: () => void paste() },
+    { label: "粘贴", run: () => void pasteFromSystemClipboard() },
     { label: "全选", run: () => editor?.chain().focus().selectAll().run() },
     "separator",
     { label: "插入表格…", hotkey: "insertTable", run: () => setOverlay({ kind: "insertTable" }) },

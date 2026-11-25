@@ -89,6 +89,8 @@ export interface AppState {
   /** 打开的页签，顺序即显示顺序；filePath 为当前页签。 */
   tabs: DocumentTab[];
   headings: HeadingItem[];
+  /** 正文当前位置所属的标题。重复点击同节时可以再次定位侧栏。 */
+  outlineLocation: { index: number } | null;
   /** 大纲中已折叠的标题键（见 sidebar/outlineFold.ts）；切换文档时清空（DC-077）。 */
   outlineCollapsed: Set<string>;
   /** 文档内容每次变化后递增，供批注面板刷新定位状态。 */
@@ -136,7 +138,8 @@ export interface AppState {
   /** 在当前页签右侧加入页签；已存在时不变。 */
   openTab: (path: string) => void;
   removeTab: (path: string) => void;
-  setHeadings: (headings: HeadingItem[]) => void;
+  setHeadings: (headings: HeadingItem[], position?: number) => void;
+  setOutlinePosition: (position: number, revealAgain?: boolean) => void;
   setOutlineCollapsed: (collapsed: Set<string>) => void;
   bumpDocVersion: () => void;
   setWordCounts: (total: number, selected: number) => void;
@@ -159,6 +162,32 @@ export interface AppState {
   setPreview: (preview: SearchPreviewTarget | null) => void;
 }
 
+/** 在按正文位置排列的标题中二分查找，取当前位置前的最后一个标题。 */
+function locateOutlineHeading(
+  headings: HeadingItem[],
+  position: number | undefined,
+  previous: AppState["outlineLocation"],
+): AppState["outlineLocation"] {
+  if (position === undefined) {
+    return null;
+  }
+  let first = 0;
+  let last = headings.length;
+  while (first < last) {
+    const middle = Math.floor((first + last) / 2);
+    if (headings[middle].line <= position) {
+      first = middle + 1;
+    } else {
+      last = middle;
+    }
+  }
+  const index = first - 1;
+  if (index < 0) {
+    return null;
+  }
+  return previous?.index === index ? previous : { index };
+}
+
 export const useAppStore = create<AppState>((set) => ({
   workspace: null,
   tree: null,
@@ -166,6 +195,7 @@ export const useAppStore = create<AppState>((set) => ({
   dirty: false,
   tabs: [],
   headings: [],
+  outlineLocation: null,
   outlineCollapsed: new Set<string>(),
   docVersion: 0,
   documentCharCount: 0,
@@ -194,8 +224,12 @@ export const useAppStore = create<AppState>((set) => ({
   setTree: (tree) => set({ tree }),
   mergeTreeNode: (loaded) => set((state) => ({ tree: state.tree ? replaceTreeNode(state.tree, loaded) : state.tree })),
   // 大纲折叠键由标题层级、文字和序号组成，换文档后不再适用，随之清空。
-  setFilePath: (filePath) =>
-    set((state) => (state.filePath === filePath ? {} : { filePath, outlineCollapsed: new Set<string>() })),
+  setFilePath: (filePath) => set((state) => {
+    if (state.filePath === filePath) {
+      return state;
+    }
+    return { filePath, outlineCollapsed: new Set<string>(), outlineLocation: null };
+  }),
   // 未保存状态同时记在当前页签上，切换页签后据此恢复。
   setDirty: (dirty) =>
     set((state) => ({
@@ -218,7 +252,15 @@ export const useAppStore = create<AppState>((set) => ({
       return { tabs };
     }),
   removeTab: (path) => set((state) => ({ tabs: state.tabs.filter((tab) => tab.path !== path) })),
-  setHeadings: (headings) => set({ headings }),
+  setHeadings: (headings, position) => set((state) => ({
+    headings,
+    outlineLocation: locateOutlineHeading(headings, position, state.outlineLocation),
+  })),
+  setOutlinePosition: (position, revealAgain = false) => set((state) => {
+    const previous = revealAgain ? null : state.outlineLocation;
+    const outlineLocation = locateOutlineHeading(state.headings, position, previous);
+    return outlineLocation === state.outlineLocation ? state : { outlineLocation };
+  }),
   setOutlineCollapsed: (outlineCollapsed) => set({ outlineCollapsed }),
   bumpDocVersion: () => set((state) => ({ docVersion: state.docVersion + 1 })),
   setWordCounts: (documentCharCount, selectionCharCount) =>

@@ -1,11 +1,11 @@
 /**
  * 文档大纲。移植自 VMark Sidebar/OutlineView：沿用其标题树、过滤与折叠逻辑
  * （vendor/vmark/utils/markdownOutline），去掉多窗口事件、按标签页保存的折叠状态和多格式分发。
- * 标题直接取自编辑器文档，点击跳到对应标题节点。
+ * 标题直接取自编辑器文档。点击标题跳到正文，正文也会定位大纲中的当前章节。
  * 折叠状态在应用状态里（outlineCollapsed），以便快捷键按层级折叠（DC-077）。
  */
 
-import { memo, useCallback, useDeferredValue, useMemo, useState } from "react";
+import { memo, useCallback, useDeferredValue, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, ListChevronsDownUp, ListOrdered, Search, X } from "lucide-react";
 import { buildHeadingTree, filterHeadingTree, type HeadingNode } from "@vmark/utils/markdownOutline";
 import { PopupMenu } from "../components/PopupMenu";
@@ -23,6 +23,53 @@ const FOLD_LEVEL_ENTRIES: { level: (typeof OUTLINE_FOLD_LEVELS)[number]; label: 
   { level: 2, label: "只留到二级标题", hotkey: "outlineLevel2" },
   { level: 3, label: "只留到三级标题", hotkey: "outlineLevel3" },
 ];
+
+/** 找到目标标题在当前树中的路径，若被折叠，定位到遮住它的可见上级。 */
+function visibleHeadingIndex(
+  nodes: HeadingNode[],
+  index: number,
+  collapsed: Set<string>,
+  forceExpand: boolean,
+): number | null {
+  let siblings = nodes;
+  let visibleAncestor: number | null = null;
+  while (siblings.length > 0) {
+    const node = siblings.findLast((candidate) => candidate.index <= index);
+    if (!node) {
+      return null;
+    }
+    if (node.index === index) {
+      return visibleAncestor ?? node.index;
+    }
+    if (visibleAncestor === null && !forceExpand && collapsed.has(headingKey(node))) {
+      visibleAncestor = node.index;
+    }
+    siblings = node.children;
+  }
+  return null;
+}
+
+/** 只滚动大纲列表。目标完全可见时保留滚动位置，越界时移动到最近边缘。 */
+function revealOutlineRow(list: HTMLUListElement, row: HTMLElement): (() => void) | undefined {
+  const viewportTop = list.getBoundingClientRect().top + list.clientTop;
+  const viewportBottom = viewportTop + list.clientHeight;
+  const bounds = row.getBoundingClientRect();
+  let delta = 0;
+  if (bounds.top < viewportTop) {
+    delta = bounds.top - viewportTop;
+  } else if (bounds.bottom > viewportBottom) {
+    delta = bounds.bottom - viewportBottom;
+  }
+  if (delta === 0) {
+    return;
+  }
+  const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  list.scrollTo({ top: list.scrollTop + delta, behavior: reducedMotion ? "auto" : "smooth" });
+  if (!reducedMotion) {
+    // 快速切换章节时中止上一次动画，从当前滚动位置重新计算。
+    return () => list.scrollTo({ top: list.scrollTop, behavior: "auto" });
+  }
+}
 
 const OutlineItem = memo(function OutlineItem({
   node,
@@ -114,9 +161,10 @@ export function OutlineView() {
   const updateEditor = useSettings((state) => state.update);
   const [query, setQuery] = useState("");
   const collapsed = useAppStore((state) => state.outlineCollapsed);
+  const location = useAppStore((state) => state.outlineLocation);
   const setCollapsed = useAppStore((state) => state.setOutlineCollapsed);
   const [foldMenu, setFoldMenu] = useState<{ x: number; y: number } | null>(null);
-  const [activeIndex, setActiveIndex] = useState<number | null>(null);
+  const listRef = useRef<HTMLUListElement>(null);
   const deferredQuery = useDeferredValue(query);
   const filterActive = deferredQuery.trim().length > 0;
 
@@ -127,6 +175,22 @@ export function OutlineView() {
     [headings, headingNumbers],
   );
   const visibleTree = useMemo(() => filterHeadingTree(tree, deferredQuery), [tree, deferredQuery]);
+  const headingIndex = location?.index;
+  const activeIndex = useMemo(() => {
+    if (headingIndex === undefined) {
+      return null;
+    }
+    return visibleHeadingIndex(visibleTree, headingIndex, collapsed, filterActive);
+  }, [visibleTree, headingIndex, collapsed, filterActive]);
+
+  useLayoutEffect(() => {
+    const list = listRef.current;
+    const row = list?.querySelector<HTMLElement>(".dc-outline-row.is-active");
+    if (location && list && row) {
+      return revealOutlineRow(list, row);
+    }
+    // 只响应正文定位。用户操作侧栏过滤或折叠时由原来的滚动位置继续显示。
+  }, [location]);
 
   const handleToggle = useCallback(
     (key: string) => {
@@ -150,12 +214,12 @@ export function OutlineView() {
   }));
 
   const handleSelect = useCallback((node: HeadingNode) => {
-    setActiveIndex(node.index);
     const editor = getEditor();
     if (!editor) {
       return;
     }
     // line 存放的是标题节点位置，+1 把光标放进标题文字内。
+    useAppStore.getState().setOutlinePosition(node.line + 1);
     revealPosition(node.line + 1);
   }, []);
 
@@ -219,7 +283,7 @@ export function OutlineView() {
         </button>
       </div>
       {visibleTree.length > 0 ? (
-        <ul className="dc-outline-tree" role="tree">
+        <ul className="dc-outline-tree" role="tree" ref={listRef}>
           {visibleTree.map((node) => (
             <OutlineItem
               key={node.index}
