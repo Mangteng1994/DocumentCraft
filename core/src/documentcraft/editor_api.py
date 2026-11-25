@@ -106,10 +106,16 @@ def _notes_database(root: Path) -> Path:
 
 
 def _notes_in_folder(root: Path, source: Path) -> list[dict]:
+    """只读打开指定目录的批注库，并按文档相对路径查找批注。"""
     database = _notes_database(root)
     if not database.is_file():
         return []
-    with closing(sqlite3.connect(f"{database.as_uri()}?mode=ro", uri=True)) as db:
+    database_uri = database.as_uri()
+    # UNC 共享的服务器名必须保留在路径中。默认 SQLite 会拒绝 URI 中的远程主机名。
+    if not database_uri.startswith("file:///"):
+        share_path = database_uri.removeprefix("file://")
+        database_uri = f"file:////{share_path}"
+    with closing(sqlite3.connect(f"{database_uri}?mode=ro", uri=True)) as db:
         db.row_factory = sqlite3.Row
         table = db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='notes'")
         if table.fetchone() is None:

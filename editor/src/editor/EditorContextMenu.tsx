@@ -86,7 +86,6 @@ export function EditorContextMenu() {
   const menu = useAppStore((state) => state.contextMenu);
   const setContextMenu = useAppStore((state) => state.setContextMenu);
   const setOverlay = useAppStore((state) => state.setOverlay);
-  const setRightPanel = useAppStore((state) => state.setRightPanel);
   const requestComment = useAppStore((state) => state.requestComment);
   const commands = useCopilot((state) => state.commands);
   const container = useRef<HTMLDivElement>(null);
@@ -149,11 +148,13 @@ export function EditorContextMenu() {
   };
 
   const addComment = () => {
-    if (!editor || !anchorFromSelection(editor.state)) {
+    if (!editor) {
       return;
     }
-    setRightPanel("comments");
-    requestComment();
+    const anchor = anchorFromSelection(editor.state);
+    if (anchor) {
+      requestComment(anchor);
+    }
   };
 
   const commandItems: MenuItem[] = commands

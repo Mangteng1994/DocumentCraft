@@ -5,7 +5,7 @@
 
 import { create } from "zustand";
 import type { IndexProgress, TreeNode } from "./backend";
-import type { Note } from "./editor/annotations";
+import type { Note, NoteAnchor } from "./editor/annotations";
 import type { HeadingItem } from "@vmark/utils/markdownOutline";
 import type { SearchMode } from "./settings/schema";
 
@@ -105,8 +105,8 @@ export interface AppState {
   overlay: Overlay;
   contextMenu: ContextMenuState | null;
   imagePopover: ImagePopoverState | null;
-  /** 右键「添加批注」时递增，批注面板据此为当前选区开始新建批注。 */
-  commentRequest: number;
+  /** 右键「添加批注」时捕获的选区，供批注面板打开后使用一次。 */
+  commentRequest: NoteAnchor | null;
   /** 侧栏顶部的搜索框是否打开（Ctrl+F）。 */
   searchOpen: boolean;
   /** 搜索关键词，搜索框关闭时清空。 */
@@ -151,7 +151,8 @@ export interface AppState {
   openSettings: (tab?: SettingsTab) => void;
   setContextMenu: (menu: ContextMenuState | null) => void;
   setImagePopover: (popover: ImagePopoverState | null) => void;
-  requestComment: () => void;
+  requestComment: (anchor: NoteAnchor) => void;
+  clearCommentRequest: () => void;
   setSearchQuery: (query: string) => void;
   openSearch: () => void;
   closeSearch: () => void;
@@ -207,7 +208,7 @@ export const useAppStore = create<AppState>((set) => ({
   overlay: null,
   contextMenu: null,
   imagePopover: null,
-  commentRequest: 0,
+  commentRequest: null,
   searchOpen: false,
   searchQuery: "",
   searchFocusRequest: 0,
@@ -228,7 +229,7 @@ export const useAppStore = create<AppState>((set) => ({
     if (state.filePath === filePath) {
       return state;
     }
-    return { filePath, outlineCollapsed: new Set<string>(), outlineLocation: null };
+    return { filePath, outlineCollapsed: new Set<string>(), outlineLocation: null, commentRequest: null };
   }),
   // 未保存状态同时记在当前页签上，切换页签后据此恢复。
   setDirty: (dirty) =>
@@ -273,12 +274,13 @@ export const useAppStore = create<AppState>((set) => ({
   setNotes: (notes) => set({ notes }),
   setActiveNoteId: (activeNoteId) => set({ activeNoteId }),
   setSidebarView: (sidebarView) => set({ sidebarView }),
-  setRightPanel: (rightPanel) => set({ rightPanel }),
+  setRightPanel: (rightPanel) => set({ rightPanel, commentRequest: null }),
   setOverlay: (overlay) => set({ overlay, contextMenu: null }),
   openSettings: (tab = "appearance") => set({ overlay: { kind: "settings", tab }, contextMenu: null }),
   setContextMenu: (contextMenu) => set({ contextMenu }),
   setImagePopover: (imagePopover) => set({ imagePopover }),
-  requestComment: () => set((state) => ({ commentRequest: state.commentRequest + 1 })),
+  requestComment: (anchor) => set({ rightPanel: "comments", commentRequest: anchor }),
+  clearCommentRequest: () => set({ commentRequest: null }),
   setSearchQuery: (searchQuery) => set({ searchQuery }),
   // 搜索的是整个工作区，结果替换目录树，所以打开搜索时切到「文件」视图。
   openSearch: () => set((state) => ({ searchOpen: true, sidebarView: "files", searchFocusRequest: state.searchFocusRequest + 1 })),

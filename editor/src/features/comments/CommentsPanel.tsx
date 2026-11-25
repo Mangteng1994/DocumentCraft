@@ -3,7 +3,7 @@
  * 列表结构参照 VMark Comments/CommentsPanel，数据改为 docflow 管理的 SQLite 批注库。
  */
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { MessageSquarePlus, Package, Pencil, Trash2 } from "lucide-react";
 import { save } from "@tauri-apps/plugin-dialog";
 import { docflow, errorText } from "../../backend";
@@ -91,6 +91,8 @@ export function CommentsPanel() {
   const notes = useAppStore((state) => state.notes);
   const activeNoteId = useAppStore((state) => state.activeNoteId);
   const docVersion = useAppStore((state) => state.docVersion);
+  const commentRequest = useAppStore((state) => state.commentRequest);
+  const clearCommentRequest = useAppStore((state) => state.clearCommentRequest);
   const [pending, setPending] = useState<NoteAnchor | null>(null);
   const [body, setBody] = useState("");
   const [message, setMessage] = useState("");
@@ -120,21 +122,23 @@ export function CommentsPanel() {
       show("请先在同一段内选中要批注的文字。", "warning");
       return;
     }
-    setPending(anchor);
-    setBody("");
-    show("");
+    startDraft(anchor);
   };
 
-  // 右键菜单「添加批注」：打开面板后立即为当前选区开始新建批注。
-  const commentRequest = useAppStore((state) => state.commentRequest);
-  const handledRequest = useRef(commentRequest);
   useEffect(() => {
-    if (commentRequest === handledRequest.current) {
+    if (!commentRequest) {
       return;
     }
-    handledRequest.current = commentRequest;
-    handleStart();
-  }, [commentRequest]);
+    startDraft(commentRequest);
+    clearCommentRequest();
+  }, [commentRequest, clearCommentRequest]);
+
+  /** 用打开面板前捕获的选区建立草稿。 */
+  function startDraft(anchor: NoteAnchor): void {
+    setPending(anchor);
+    setBody("");
+    setMessage("");
+  }
 
   const handleAdd = async () => {
     if (!pending) {
