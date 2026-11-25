@@ -33,7 +33,7 @@
 | DC-030 | 文件树 | 侧栏显示工作区目录树，跳过隐藏目录与链接，点击 Markdown 打开，可刷新 | 已验收（模拟 IPC + Rust 测试） · `FileTree.tsx`、`workspace.rs` |
 | DC-031 | 文档大纲 | 侧栏按标题层级显示可折叠大纲，支持过滤，点击跳到对应标题。点击正文时高亮所属标题；子标题折叠时定位到可见上级；目标已可见时不滚动，越界时只滚动到最近的可见位置 | 层级、过滤与点击跳转此前已验收（模拟 IPC）；正文联动已实现于 `MarkdownEditor.tsx`、`store.ts`、`OutlineView.tsx`、`app.css`。TypeScript 静态检查通过，未测试 |
 | DC-032 | 编辑器内导出 Word | 从「设置 → MD 转 Word」把当前文档按样式或完整模板导出 DOCX，默认模板与模式可保存，可选包含批注；已有输出受保护 | 已实现 · 入口移至设置 · `editor/src/features/settings/WordExportSettings.tsx` → `docflow md-to-word --with-notes`；设置页经模拟 IPC 验收，导出逻辑沿用此前实跑结果 |
-| DC-033 | 编辑器批注 | 选中正文添加批注，侧栏列出并定位；批注按原文与前后文锚定，编辑后重新定位，无法定位的标记为待定位；数据沿用 `.documentcraft/reader-spike.sqlite3` | 已验收（CLI 实跑 + 模拟 IPC） · `annotations.ts`、`CommentsPanel.tsx`、`docflow notes` |
+| DC-033 | 编辑器批注 | 选中正文添加批注，侧栏列出并定位；批注按原文与前后文锚定，编辑后重新定位，无法定位的标记为待定位；本地和 Windows 网络共享上的批注均可保存、重开读取；首次右键添加即打开草稿，面板保持在窗口范围内，窄窗口以悬浮方式显示；数据沿用 `.documentcraft/reader-spike.sqlite3` | 基础功能此前已验收（CLI 实跑 + 模拟 IPC）。网络共享读取及侧栏修复已实现并重新打包 0.4.5 · `editor_api.py`、`cli.py`、`EditorContextMenu.tsx`、`CommentsPanel.tsx`、`app.css`；构建通过，网络共享和原生界面未测试 |
 | DC-034 | Copilot 工作区整理 | 交互对应 Obsidian Copilot 的 Quick Chat：流式回答与停止；当前笔记、选区、[[笔记]] 与 + / @ 添加的上下文；/ 命令；对话与工作区检索两种模式；消息复制、编辑、插入或替换、重新生成、删除；对话自动保存与历史；AI 连接沿用已有配置 | 已验收（模拟 IPC） · `editor/src/features/copilot/`、`docflow chat`；流式对话经本地假 API 实跑，真实 AI 服务未请求 |
 | DC-035 | 编辑器内科研配图 | 从「设置 → 科研流程图」对当前文档或选定报告发起配图分析，可保存绘图风格，确认外发后预览并选择回插 | 已实现 · `editor/src/features/settings/FigureSettings.tsx` → `docflow illustrate --stage`；已核对原生设置、选报告和发送确认窗口，见 DC-061 |
 | DC-036 | 编辑器 AI 设置 | 兼容 API 与 ChatGPT 套餐两种连接；登录、取消、退出、模型和推理强度选择并保存；API Key 仅保留在当前会话 | 部分验收 · 移入「设置 → AI 连接」`editor/src/features/settings/AIConnectionSettings.tsx`；登录、取消与模型读取未执行 |

@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import sqlite3
 import sys
 from pathlib import Path
 
@@ -148,7 +149,7 @@ def main(argv: list[str] | None = None) -> int:
             report = _run_editor_command(args)
         else:
             report = _convert(args)
-    except (ConversionError, OSError, ValueError) as error:
+    except (ConversionError, OSError, ValueError, sqlite3.Error) as error:
         if json_output:
             _print_json({"status": "error", "message": str(error)})
         else:

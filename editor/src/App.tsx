@@ -218,7 +218,7 @@ export function App() {
                 <X size={iconSize.sm} />
               </button>
             </div>
-            {rightPanel === "comments" ? <CommentsPanel /> : <CopilotView />}
+            {rightPanel === "comments" ? <CommentsPanel key={filePath} /> : <CopilotView />}
           </aside>
         )}
       </div>
