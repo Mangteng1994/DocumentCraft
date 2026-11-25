@@ -116,9 +116,28 @@ export function storeImage(document: string, data: Uint8Array, extension: string
   return invoke<string>("store_image", { document, data: Array.from(data), extension });
 }
 
-/** 把本地图片复制到文档旁的 assets/，返回相对于文档目录的路径。 */
+/** 导入本地图片，当前 assets 内的文件直接复用，返回相对于文档目录的路径。 */
 export function importImage(document: string, source: string): Promise<string> {
   return invoke<string>("import_image", { document, source });
+}
+
+export interface ImageRenameDocument {
+  path: string;
+  content: string;
+}
+
+export interface ImageReferenceChange extends ImageRenameDocument {
+  original: string;
+}
+
+/** 完整读取工作区 Markdown，并补上跨工作区的已打开页签。 */
+export function imageRenameDocuments(root: string, extraPaths: string[]): Promise<ImageRenameDocument[]> {
+  return invoke<ImageRenameDocument[]>("image_rename_documents", { root, extraPaths });
+}
+
+/** 保留图片扩展名，改名并同步核对过的文档引用；冲突或写入失败时恢复。 */
+export function renameImageWithReferences(document: string, source: string, newStem: string, changes: ImageReferenceChange[]): Promise<string> {
+  return invoke<string>("rename_image_with_references", { document, source, newStem, changes });
 }
 
 export function readText(path: string): Promise<string> {

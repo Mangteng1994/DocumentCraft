@@ -128,6 +128,11 @@ export function App() {
   useEffect(() => {
     const appWindow = getCurrentWindow();
     const unlisten = appWindow.onCloseRequested(async (event) => {
+      if (useAppStore.getState().imageRenameRunning) {
+        event.preventDefault();
+        useAppStore.getState().setStatus("图片正在改名并更新引用，请完成后再关闭窗口。");
+        return;
+      }
       const unsaved = useAppStore.getState().tabs.filter((tab) => tab.dirty);
       if (unsaved.length === 0) {
         return;

@@ -13,15 +13,18 @@ import {
   createMarkdown,
   docflow,
   errorText,
+  imageRenameDocuments,
   listDir,
   listTree,
   moveEntry,
   openPath,
   readText,
   renameEntry,
+  renameImageWithReferences,
   revealEntry,
   trashEntry,
   writeText,
+  type ImageReferenceChange,
 } from "./backend";
 import { setDocumentDirectory } from "./editor/assets";
 import {
@@ -35,7 +38,8 @@ import {
   type DocumentSnapshot,
 } from "./editor/editorHandle";
 import { setAnnotationMeta, type Note, type NoteAnchor } from "./editor/annotations";
-import { fileName, parentDirectory } from "./paths";
+import { fileName, joinPath, parentDirectory } from "./paths";
+import { imageReferenceTransaction, isManagedImage, registerImageRename, rewriteImageMarkdown } from "./editor/imageReferences";
 import { MAX_RECENT_WORKSPACES } from "./settings/schema";
 import { useSettings } from "./settings/settingsStore";
 import { useAppStore, type SearchPreviewTarget } from "./store";
@@ -194,6 +198,102 @@ export async function chooseFile(): Promise<void> {
 
 /** 各页签的编辑现场，键为文档路径。当前页签的现场在切走时才写入。 */
 const snapshots = new Map<string, DocumentSnapshot>();
+const pendingSaves = new Set<Promise<boolean>>();
+
+/** 图片物理改名，同时更新工作区磁盘引用、所有页签现场，保留正文的未保存修改和撤销历史。 */
+export async function renameDocumentImage(source: string, newStem: string): Promise<number> {
+  const store = useAppStore.getState();
+  if (store.imageRenameRunning) {
+    throw new Error("已有图片正在改名，请稍候再试。");
+  }
+  store.setImageRenameRunning(true);
+  try {
+    // 先等此前发起的保存结束；期间新保存会被拦住，防止旧地址晚于改名回写。
+    await Promise.all([...pendingSaves]);
+    return await performImageRename(source, newStem);
+  } finally {
+    store.setImageRenameRunning(false);
+  }
+}
+
+/** 在已暂停保存的窗口内检查引用、提交文件改名，再更新编辑器现场。 */
+async function performImageRename(source: string, newStem: string): Promise<number> {
+  const store = useAppStore.getState();
+  const document = store.filePath;
+  const editor = getEditor();
+  if (!document || !editor) {
+    throw new Error("请先打开包含这张图片的文档。");
+  }
+  if (!isManagedImage(document, source)) {
+    throw new Error("仅支持重命名当前文档 assets 文件夹中的图片。");
+  }
+  const name = fileName(source);
+  const dot = name.lastIndexOf(".");
+  const stem = newStem.trim();
+  if (!stem) {
+    throw new Error("图片名称不能为空。");
+  }
+  const targetName = `${stem}${name.slice(dot)}`;
+  if (targetName === name) {
+    return 0;
+  }
+  const target = joinPath(parentDirectory(source), targetName);
+  const root = store.workspace && isInside(document, store.workspace) ? store.workspace : parentDirectory(document);
+  const documents = await imageRenameDocuments(root, store.tabs.map((tab) => tab.path));
+  const changes: ImageReferenceChange[] = [];
+  for (let index = 0; index < documents.length; index += 1) {
+    const candidate = documents[index];
+    const content = rewriteImageMarkdown(candidate.content, candidate.path, source, target);
+    if (content !== candidate.content) {
+      changes.push({ path: candidate.path, original: candidate.content, content });
+    }
+    if (index % 16 === 0) {
+      await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
+    }
+  }
+  // 后端持有文件句柄完成版本核对与回写，出现外部修改、重名或写入失败时不会留下部分更新。
+  const renamed = await renameImageWithReferences(document, source, stem, changes);
+  registerImageRename(source, renamed);
+  // 扫描期间用户可能切换页签，因此在成功后读取最新的当前文档与现场。
+  const current = useAppStore.getState();
+  const activePath = current.filePath;
+  const activeEditor = getEditor();
+  const wasDirty = current.dirty;
+  const needsSave: string[] = [];
+  const wasScanned = (path: string) => documents.some((candidate) => isInside(path, candidate.path) && isInside(candidate.path, path));
+  for (const [path, snapshot] of snapshots) {
+    const transaction = imageReferenceTransaction(snapshot.state, path, source, renamed);
+    if (transaction) {
+      snapshots.set(path, {
+        ...snapshot,
+        state: snapshot.state.apply(transaction),
+        clean: rewriteImageMarkdown(snapshot.clean, path, source, renamed),
+      });
+      if (!wasScanned(path)) {
+        needsSave.push(path);
+      }
+    }
+  }
+  if (activePath && activeEditor) {
+    const transaction = imageReferenceTransaction(activeEditor.state, activePath, source, renamed);
+    if (transaction) {
+      activeEditor.view.dispatch(transaction);
+      if (!wasDirty && wasScanned(activePath)) {
+        markClean();
+        current.setDirty(false);
+      } else if (!wasScanned(activePath)) {
+        needsSave.push(activePath);
+      }
+    }
+  }
+  if (needsSave.length > 0) {
+    store.markTabsDirty(needsSave);
+  }
+  store.setImagePopover(null);
+  store.setStatus(`图片已重命名为「${fileName(renamed)}」，已同步 ${changes.length} 篇 Markdown 的引用。`);
+  void refreshTree();
+  return changes.length;
+}
 
 /** 切走前保存当前页签的编辑现场。 */
 function rememberCurrent(): void {
@@ -309,14 +409,41 @@ export async function switchTab(step: number): Promise<void> {
 /** 保存当前文档，返回是否成功。 */
 export async function saveDocument(): Promise<boolean> {
   const store = useAppStore.getState();
+  if (store.imageRenameRunning) {
+    store.setStatus("图片正在改名并更新引用，请完成后再保存。");
+    return false;
+  }
+  const saving = saveCurrentDocument();
+  pendingSaves.add(saving);
+  try {
+    return await saving;
+  } finally {
+    pendingSaves.delete(saving);
+  }
+}
+
+/** 写入当前内容并更新保存基线，进行中的请求由图片改名流程统一等待。 */
+async function saveCurrentDocument(): Promise<boolean> {
+  const store = useAppStore.getState();
   if (!store.filePath) {
     return false;
   }
+  const path = store.filePath;
+  const savedDocument = getEditor()?.state.doc;
   try {
     const markdown = currentMarkdown();
-    await writeText(store.filePath, markdown);
-    markClean();
-    store.setDirty(false);
+    await writeText(path, markdown);
+    const current = useAppStore.getState();
+    // 保存期间可能继续输入或切换页签，只将确实写入的那个版本标为已保存。
+    if (current.filePath === path && getEditor()?.state.doc === savedDocument) {
+      markClean();
+      store.setDirty(false);
+    } else if (current.filePath !== path) {
+      const snapshot = snapshots.get(path);
+      if (snapshot) {
+        snapshots.set(path, { ...snapshot, clean: markdown });
+      }
+    }
     store.setStatus("已保存");
     return true;
   } catch (error) {
@@ -327,6 +454,10 @@ export async function saveDocument(): Promise<boolean> {
 
 /** 导出、配图等读取磁盘文件的操作之前，先保存未保存的修改。 */
 export async function ensureSaved(): Promise<boolean> {
+  if (useAppStore.getState().imageRenameRunning) {
+    useAppStore.getState().setStatus("图片正在改名并更新引用，请稍后再操作。");
+    return false;
+  }
   const { dirty } = useAppStore.getState();
   if (!dirty) {
     return true;

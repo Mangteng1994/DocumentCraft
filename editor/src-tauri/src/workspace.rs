@@ -82,7 +82,7 @@ fn is_markdown(path: &Path) -> bool {
 }
 
 /// 与 Python 端 `_ordinary_path` 一致：跳过符号链接和 Windows 目录联接，避免越出工作区。
-fn is_ordinary(metadata: &fs::Metadata) -> bool {
+pub(crate) fn is_ordinary(metadata: &fs::Metadata) -> bool {
     if metadata.file_type().is_symlink() {
         return false;
     }

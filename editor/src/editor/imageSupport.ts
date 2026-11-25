@@ -4,20 +4,22 @@
  * - 粘贴截图等纯图片数据：保存到文档旁的 assets/，以相对路径插入。
  * - 粘贴带图片的内容（如从 WPS 复制）：剪贴板 HTML 中的图片指向本地临时文件（`file:///…/Temp/ksohtml…`），
  *   这些文件随后会被清理。粘贴后立即把它们复制到 assets/ 并改写为相对路径，否则文档里的图片之后会全部失效。
- * - 右键「插入图片」：选择本地图片，复制到 assets/ 后插入。
+ * - 右键「插入图片」：当前文档 assets/ 内的图片直接引用，其他本地图片复制到 assets/ 后插入。
  * - 加载失败的图片标记为缺失，显示「找不到图片」和原路径，代替浏览器默认的破图标。
  */
 
 import { Extension } from "@tiptap/core";
 import type { Node as PMNode, Slice } from "@tiptap/pm/model";
 import { NodeSelection, Plugin, PluginKey, TextSelection } from "@tiptap/pm/state";
+import { isHistoryTransaction } from "@tiptap/pm/history";
 import type { EditorView } from "@tiptap/pm/view";
 import { open } from "@tauri-apps/plugin-dialog";
 import { errorText, importImage, storeImage } from "../backend";
-import { fileName } from "../paths";
+import { fileName, joinPath, parentDirectory } from "../paths";
 import { useAppStore } from "../store";
-import { absoluteLocalPath } from "./assets";
+import { absoluteLocalPath, getDocumentDirectory } from "./assets";
 import { getEditor, insertMarkdown } from "./editorHandle";
+import { imageReferencePath, normalizeRenamedImages, registerImageImport } from "./imageReferences";
 
 const IMAGE_NODE_TYPES = new Set(["image", "block_image"]);
 const MIME_EXTENSIONS: Record<string, string> = {
@@ -39,19 +41,23 @@ function setStatus(message: string): void {
 }
 
 /**
- * 以 Markdown 图片语法插入相对路径。路径由后端生成，不含空格和括号，无需转义。
+ * 以 Markdown 图片语法插入相对路径。复用已有图片时原名可能带空格和括号，用尖括号包裹目标路径。
  * 独占一行的图片插入后会处于整块选中状态，紧接着再粘贴就会把它替换掉，因此把光标放进图片后面的段落；
  * 后面紧跟的不是文字段落（如另一张图片）时先补一个空段落，避免光标落到下一张图片上把它选中。
  */
-function insertImageReference(relativePath: string): void {
-  insertMarkdown(`![](${relativePath})`);
+function insertImageReference(relativePath: string, document: string): boolean {
   const editor = getEditor();
-  if (!editor) {
-    return;
+  if (!editor || currentDocument() !== document) {
+    setStatus("图片已保存，但当前文档已切换，请返回原文档重新插入。");
+    return false;
   }
+  const absolute = joinPath(parentDirectory(document), relativePath);
+  registerImageImport(absolute);
+  const reference = imageReferencePath(document, absolute);
+  insertMarkdown(`![](<${reference}>)`);
   const { selection, doc, schema } = editor.state;
   if (!(selection instanceof NodeSelection)) {
-    return;
+    return true;
   }
   const transaction = editor.state.tr;
   const nodeAfter = doc.resolve(selection.to).nodeAfter;
@@ -60,6 +66,7 @@ function insertImageReference(relativePath: string): void {
   }
   transaction.setSelection(TextSelection.create(transaction.doc, selection.to + 1));
   editor.view.dispatch(transaction);
+  return true;
 }
 
 async function insertClipboardImages(files: File[]): Promise<void> {
@@ -77,8 +84,9 @@ async function insertClipboardImages(files: File[]): Promise<void> {
     try {
       const buffer = await file.arrayBuffer();
       const relativePath = await storeImage(document, new Uint8Array(buffer), extension);
-      insertImageReference(relativePath);
-      setStatus(`图片已保存到 ${relativePath}`);
+      if (insertImageReference(relativePath, document)) {
+        setStatus(`图片已保存到 ${relativePath}`);
+      }
     } catch (error) {
       setStatus(errorText(error));
     }
@@ -119,13 +127,13 @@ function replaceImageSource(from: string, to: string): void {
   }
 }
 
-/** 把粘贴进来的本地图片复制到 assets/ 并改写引用。源文件已不存在时保留原地址并提示。 */
+/** 将粘贴的本地图片整理为 assets/ 相对引用，目录内已有图片直接复用；失败时保留原地址并提示。 */
 async function localizePastedImages(sources: string[]): Promise<void> {
   const document = currentDocument();
   if (!document || sources.length === 0) {
     return;
   }
-  let copied = 0;
+  let localized = 0;
   let failed = 0;
   for (const source of sources) {
     const absolute = absoluteLocalPath(source);
@@ -134,17 +142,23 @@ async function localizePastedImages(sources: string[]): Promise<void> {
     }
     try {
       const relativePath = await importImage(document, absolute);
-      replaceImageSource(source, relativePath);
-      copied += 1;
+      if (currentDocument() !== document) {
+        setStatus("图片已保存，但当前文档已切换，请返回原文档重新插入。");
+        return;
+      }
+      const savedPath = joinPath(parentDirectory(document), relativePath);
+      registerImageImport(savedPath);
+      replaceImageSource(source, imageReferencePath(document, savedPath));
+      localized += 1;
     } catch {
       failed += 1;
     }
   }
   if (failed > 0) {
-    setStatus(`已复制 ${copied} 张图片到 assets/，${failed} 张的源文件不存在，保留原地址。`);
+    setStatus(`已整理 ${localized} 张图片的 assets/ 引用，${failed} 张处理失败，保留原地址。`);
     return;
   }
-  setStatus(`已复制 ${copied} 张图片到 assets/`);
+  setStatus(`已整理 ${localized} 张图片的 assets/ 引用`);
 }
 
 function handlePaste(_view: EditorView, event: ClipboardEvent, slice: Slice): boolean {
@@ -193,6 +207,16 @@ export const imageSupportExtension = Extension.create({
       new Plugin({
         key: imageSupportKey,
         props: { handlePaste },
+        appendTransaction(transactions, _previous, state) {
+          if (!transactions.some(isHistoryTransaction)) {
+            return null;
+          }
+          const directory = getDocumentDirectory();
+          if (!directory) {
+            return null;
+          }
+          return normalizeRenamedImages(state, `${directory}\\_document.md`);
+        },
         view(view) {
           // load、error 不冒泡，需要在捕获阶段监听。
           view.dom.addEventListener("error", markImage, true);
@@ -209,7 +233,7 @@ export const imageSupportExtension = Extension.create({
   },
 });
 
-/** 右键「插入图片」：选择本地图片，复制到 assets/ 后插入到光标处。 */
+/** 右键「插入图片」：选择本地图片，复用或导入 assets/ 后插入到光标处。 */
 export async function chooseAndInsertImage(): Promise<void> {
   const document = currentDocument();
   if (!document) {
@@ -226,8 +250,9 @@ export async function chooseAndInsertImage(): Promise<void> {
   }
   try {
     const relativePath = await importImage(document, selected);
-    insertImageReference(relativePath);
-    setStatus(`图片已复制到 ${relativePath}`);
+    if (insertImageReference(relativePath, document)) {
+      setStatus(`已插入图片：${relativePath}`);
+    }
   } catch (error) {
     setStatus(errorText(error));
   }

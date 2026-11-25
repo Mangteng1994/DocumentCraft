@@ -213,6 +213,8 @@ textarea {
 }
 
 .dc-editor-area {
+  display: flex;
+  flex-direction: column;
   flex: 1;
   min-height: 0;
 }
@@ -2082,8 +2084,52 @@ textarea {
  */
 
 .dc-editor-scroll {
-  height: 100%;
+  flex: 1;
+  min-height: 0;
   overflow: auto;
+}
+
+/* 当前文档搜索（DC-086）：搜索栏固定在页签下方，正文单独滚动。 */
+.dc-document-search {
+  display: flex;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--dc-space-sm);
+  padding: var(--dc-space-sm) var(--dc-space-lg);
+  border-bottom: var(--dc-border);
+  background: var(--dc-color-surface);
+  color: var(--dc-color-ink-muted);
+  font-size: var(--dc-font-size-sm);
+}
+
+.dc-document-search .dc-document-search-input {
+  flex: 1;
+  min-width: var(--dc-size-document-search-input-min);
+  width: auto;
+}
+
+.dc-document-search-count {
+  min-width: var(--dc-size-preview-count);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.dc-document-search-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--dc-space-xs);
+  margin-left: auto;
+}
+
+.dc-document-search-match {
+  border-radius: var(--dc-radius-sm);
+  background: var(--dc-color-search-hit);
+}
+
+.dc-document-search-match.is-current {
+  background: var(--dc-color-document-search-current);
+  box-shadow: var(--dc-shadow-document-search-current);
 }
 
 .dc-editor-host {
@@ -2424,6 +2470,8 @@ textarea {
   flex-direction: column;
   gap: var(--dc-space-md);
   width: var(--dc-size-image-popover);
+  max-height: var(--dc-size-image-popover-max-height);
+  overflow-y: auto;
   max-width: calc(100vw - 2 * var(--dc-space-md));
   margin: var(--dc-space-xs) 0;
   padding: var(--dc-space-md);
@@ -2459,6 +2507,16 @@ textarea {
   display: flex;
   flex-wrap: wrap;
   gap: var(--dc-space-sm);
+}
+
+.dc-image-popover-rename {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dc-space-md);
+}
+
+.dc-image-popover-error {
+  color: var(--dc-color-danger);
 }
 
 /* 找不到的图片（DC-053）：显示「找不到图片：文件名」占位，悬停显示原地址。 */

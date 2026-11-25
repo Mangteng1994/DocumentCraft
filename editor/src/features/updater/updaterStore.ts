@@ -162,6 +162,10 @@ export async function installUpdate(): Promise<void> {
     }
   }
 
+  if (useAppStore.getState().imageRenameRunning) {
+    useUpdate.setState({ error: "图片正在改名并更新引用，请完成后再安装更新。" });
+    return;
+  }
   useUpdate.setState({ phase: "installing", error: "" });
   try {
     await update.install();
