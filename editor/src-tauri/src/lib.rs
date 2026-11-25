@@ -9,6 +9,7 @@ mod docflow;
 mod extract;
 mod fileops;
 mod images;
+mod image_rename;
 mod preview;
 mod settings;
 mod textindex;
@@ -118,6 +119,8 @@ pub fn run() {
             preview::preview_file,
             images::store_image,
             images::import_image,
+            image_rename::image_rename_documents,
+            image_rename::rename_image_with_references,
             settings::load_settings,
             settings::save_settings,
             docflow::docflow_run,

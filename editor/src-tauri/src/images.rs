@@ -1,7 +1,8 @@
 //! 图片插入：把粘贴的图片数据或选中的本地图片保存到文档旁的 `assets/` 文件夹。
 //!
 //! 返回相对于文档目录的路径（如 `assets/image-1731200000000.png`），前端以此写入 Markdown，
-//! 文档连同 `assets/` 一起移动或分享时图片不会丢失。已有文件一律不覆盖，重名时加序号。
+//! 文档连同 `assets/` 一起移动或分享时图片不会丢失。已在当前 `assets/` 内的图片直接复用，
+//! 其他来源的图片复制后插入，已有文件一律不覆盖，重名时加序号。
 
 use std::fs;
 use std::io::Write;
@@ -15,7 +16,7 @@ const MAX_IMAGE_BYTES: u64 = 50 * 1024 * 1024;
 /// 同名文件存在时尝试的序号上限。
 const MAX_NAME_ATTEMPTS: usize = 1000;
 
-fn normalized_extension(extension: &str) -> Result<String, String> {
+pub(crate) fn normalized_extension(extension: &str) -> Result<String, String> {
     let lower = extension.trim_start_matches('.').to_ascii_lowercase();
     if IMAGE_EXTENSIONS.contains(&lower.as_str()) {
         return Ok(lower);
@@ -98,7 +99,7 @@ pub fn store_image(document: String, data: Vec<u8>, extension: String) -> Result
     write_unique(&folder, &timestamp_stem(), &extension, &data)
 }
 
-/// 把本地图片复制到文档旁的 `assets/`，返回相对路径。用于「插入图片」和粘贴内容中引用的临时图片。
+/// 导入本地图片并返回相对路径；当前文档的 assets 内图片直接复用，其他来源复制保存。
 #[tauri::command]
 pub fn import_image(document: String, source: String) -> Result<String, String> {
     let source_path = PathBuf::from(&source);
@@ -114,12 +115,22 @@ pub fn import_image(document: String, source: String) -> Result<String, String> 
     if metadata.len() > MAX_IMAGE_BYTES {
         return Err("图片超过 50 MB，未插入。".to_string());
     }
+    let folder = assets_folder(&document)?;
+    // 按真实路径和目录边界判断归属，兼容 ..、分隔符和目录别名；其他目录里的 assets 仍需导入。
+    let canonical_source = fs::canonicalize(&source_path)
+        .map_err(|error| format!("无法解析图片路径：{error}"))?;
+    let canonical_folder = fs::canonicalize(&folder)
+        .map_err(|error| format!("无法解析图片文件夹：{error}"))?;
+    if let Ok(relative) = canonical_source.strip_prefix(&canonical_folder) {
+        let parts: Vec<_> = relative.iter().map(|part| part.to_string_lossy()).collect();
+        let relative_path = parts.join("/");
+        return Ok(format!("{ASSETS_FOLDER}/{relative_path}"));
+    }
     let data = fs::read(&source_path).map_err(|error| format!("无法读取图片：{error}"))?;
     let stem = source_path
         .file_stem()
         .map(|value| value.to_string_lossy().into_owned())
         .unwrap_or_default();
-    let folder = assets_folder(&document)?;
     write_unique(&folder, &safe_stem(&stem), &extension, &data)
 }
 

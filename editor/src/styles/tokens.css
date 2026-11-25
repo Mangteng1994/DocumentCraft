@@ -38,6 +38,7 @@
   --dc-color-annotation-active: rgba(255, 166, 0, 0.6);
   /* 搜索结果中的命中文字，跟随强调色的浅底，在两种主题中自动适配。 */
   --dc-color-search-hit: var(--dc-color-accent-soft);
+  --dc-color-document-search-current: var(--dc-color-annotation-active);
   --dc-color-code-surface: #f3f3f3;         /* 行内代码与代码块底色，需与白色正文区可分 */
   --dc-color-quote-bar: #e0e0e0;
   --dc-color-rule: #eaecef;
@@ -163,10 +164,12 @@
   --dc-size-table-col-min: 6em;             /* 编辑区表格列的最小宽度，超出版心时表格内横向滚动（DC-080） */
   --dc-size-fold-toggle: 20px;              /* 标题末尾收拢按钮（DC-078） */
   --dc-size-image-popover: 360px;           /* 图片路径浮窗宽度（DC-079） */
+  --dc-size-image-popover-max-height: min(var(--dc-size-popover-max-height), calc(100dvh - 2 * var(--dc-space-md)));
   --dc-size-hotkey: 140px;
   --dc-size-hex-input: 96px;                 /* 五彩文档大纲配置中 HEX 输入框的宽度 */
   --dc-size-props-label: 88px;               /* 属性窗口左侧名称列的宽度 */
   --dc-size-preview-count: 48px;             /* 预览页「3 / 12」命中计数的最小宽度 */
+  --dc-size-document-search-input-min: 120px;
   --dc-size-scrollbar: 10px;
   --dc-size-toggle-width: 40px;
   --dc-size-toggle-height: 22px;
@@ -191,6 +194,7 @@
   /* 阴影 */
   --dc-shadow-dialog: 0 10px 40px rgba(0, 0, 0, 0.2);
   --dc-shadow-popover: 0 4px 16px rgba(0, 0, 0, 0.14);
+  --dc-shadow-document-search-current: inset 0 0 0 var(--dc-border-width) var(--dc-color-accent);
 
   /* 透明度与行数截断 */
   --dc-opacity-disabled: 0.5;

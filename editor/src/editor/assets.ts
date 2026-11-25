@@ -15,13 +15,18 @@ export function setDocumentDirectory(directory: string): void {
   documentDirectory = directory;
 }
 
+/** 编辑器插件在载入文档的首个事务中也需要正确的图片目录，此时页签状态可能尚未切换。 */
+export function getDocumentDirectory(): string {
+  return documentDirectory;
+}
+
 function isAbsoluteWindowsPath(value: string): boolean {
   return /^[a-zA-Z]:[\\/]/.test(value) || value.startsWith("\\\\");
 }
 
 function decoded(value: string): string {
   try {
-    return decodeURI(value);
+    return decodeURIComponent(value);
   } catch {
     return value;
   }
@@ -67,7 +72,7 @@ export interface ImageLocation {
 }
 
 /** 解析图片引用指向的位置，规则与 resolveImageSource 一致：相对路径以当前文档所在目录为基准。 */
-export function describeImageSource(source: string): ImageLocation {
+export function describeImageSource(source: string, directory = documentDirectory): ImageLocation {
   if (/^(https?:|data:|blob:|asset:)/i.test(source)) {
     return { kind: "remote", absolute: null };
   }
@@ -75,11 +80,11 @@ export function describeImageSource(source: string): ImageLocation {
   if (absolute) {
     return { kind: "local", absolute };
   }
-  if (!documentDirectory) {
+  if (!directory) {
     return { kind: "local", absolute: null };
   }
-  const separator = documentDirectory.endsWith("\\") ? "" : "\\";
-  return { kind: "local", absolute: `${documentDirectory}${separator}${decoded(source).replaceAll("/", "\\")}` };
+  const separator = directory.endsWith("\\") ? "" : "\\";
+  return { kind: "local", absolute: `${directory}${separator}${decoded(source).replaceAll("/", "\\")}` };
 }
 
 export function resolveImageSource(source: unknown): string {

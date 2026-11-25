@@ -55,7 +55,7 @@ export const ACTIONS = [
   { id: "closeTab", label: "关闭当前页签", scope: "global", defaultKey: "Ctrl+W" },
   { id: "nextTab", label: "下一个页签", scope: "global", defaultKey: "Ctrl+Tab" },
   { id: "previousTab", label: "上一个页签", scope: "global", defaultKey: "Ctrl+Shift+Tab" },
-  { id: "searchWorkspace", label: "在工作区中搜索", scope: "global", defaultKey: "Ctrl+F" },
+  { id: "searchWorkspace", label: "搜索（编辑区内搜当前文档，其他区域搜工作区）", scope: "global", defaultKey: "Ctrl+F" },
   { id: "openSettings", label: "打开设置", scope: "global", defaultKey: "Ctrl+," },
   { id: "toggleCopilot", label: "打开或关闭 Copilot", scope: "global", defaultKey: "Ctrl+Shift+L" },
   { id: "quickAsk", label: "Copilot：Quick Ask", scope: "global", defaultKey: "Ctrl+Shift+K" },

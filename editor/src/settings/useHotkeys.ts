@@ -7,6 +7,7 @@ import { useEffect } from "react";
 import { closeTab, saveDocument, switchTab } from "../documentActions";
 import { setHeading, setParagraph, type HeadingLevel } from "../editor/editorCommands";
 import { getEditor } from "../editor/editorHandle";
+import { openDocumentSearch } from "../editor/documentSearch";
 import { addSelectionToChat, openQuickAsk, toggleCopilot } from "../features/copilot/actions";
 import { foldOutlineToLevel } from "../sidebar/outlineFold";
 import { useAppStore } from "../store";
@@ -31,7 +32,7 @@ function editorHasFocus(target: EventTarget | null): boolean {
   return editor.view.dom.contains(target);
 }
 
-function runAction(action: ActionId): void {
+function runAction(action: ActionId, target: EventTarget | null): void {
   const store = useAppStore.getState();
   const level = HEADING_LEVELS[action];
   if (level) {
@@ -46,7 +47,14 @@ function runAction(action: ActionId): void {
     outlineLevel3: () => foldOutlineToLevel(3),
     save: () => void saveDocument(),
     openSettings: () => store.openSettings(),
-    searchWorkspace: () => store.openSearch(),
+    searchWorkspace: () => {
+      const inDocument = target instanceof Element && target.closest(".dc-main");
+      if (inDocument && store.filePath && !store.preview) {
+        openDocumentSearch();
+      } else {
+        store.openSearch();
+      }
+    },
     closeTab: () => {
       if (store.filePath) {
         void closeTab(store.filePath);
@@ -86,7 +94,7 @@ export function useHotkeys(): void {
       }
       event.preventDefault();
       event.stopPropagation();
-      runAction(action);
+      runAction(action, event.target);
     };
     window.addEventListener("keydown", handleKey, true);
     return () => window.removeEventListener("keydown", handleKey, true);

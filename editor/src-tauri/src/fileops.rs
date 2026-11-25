@@ -206,7 +206,7 @@ const FORBIDDEN_NAME_CHARS: &str = "<>:\"/\\|?*";
 
 /// 校验新名称，返回去掉首尾空白后的名称。规则按 Windows 文件名：不含路径分隔符和 `<>:"|?*`、控制字符，
 /// 不以点结尾（Windows 会悄悄去掉它，导致名称与预期不符），不是保留设备名。
-fn validate_new_name(name: &str) -> Result<String, String> {
+pub(crate) fn validate_new_name(name: &str) -> Result<String, String> {
     let trimmed = name.trim();
     if trimmed.is_empty() {
         return Err("名称不能为空。".to_string());
@@ -231,7 +231,7 @@ fn validate_new_name(name: &str) -> Result<String, String> {
 }
 
 /// 把条目改名（留在原文件夹），返回新路径。已有同名条目时报错，不覆盖；只改大小写时允许。
-fn rename_entry_blocking(path: &str, new_name: &str) -> Result<String, String> {
+pub(crate) fn rename_entry_blocking(path: &str, new_name: &str) -> Result<String, String> {
     let (source, _) = existing_entry(path)?;
     let name = validate_new_name(new_name)?;
     let parent = source

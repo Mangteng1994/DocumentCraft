@@ -10,6 +10,7 @@ import { selectNote } from "../documentActions";
 import { captureEditorSelection } from "../features/copilot/actions";
 import { useAppStore } from "../store";
 import { syncWordCounts } from "./wordCount";
+import { DocumentSearchBar } from "./DocumentSearchBar";
 
 // 大纲在输入停顿后再刷新，长文档连续输入时不逐键重建。
 const OUTLINE_DELAY_MS = 150;
@@ -122,8 +123,11 @@ export function MarkdownEditor() {
   }, []);
 
   return (
-    <div className="dc-editor-scroll">
-      <EditorContent editor={editor} className="dc-editor-host" />
-    </div>
+    <>
+      <DocumentSearchBar editor={editor} />
+      <div className="dc-editor-scroll">
+        <EditorContent editor={editor} className="dc-editor-host" />
+      </div>
+    </>
   );
 }

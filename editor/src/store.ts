@@ -118,6 +118,8 @@ export interface AppState {
   /** 兼容 API 的 Key 只保存在本次会话内存中。 */
   apiKey: string;
   status: string;
+  /** 图片改名会同步多个文档，期间暂停保存与关闭窗口，避免旧引用回写或操作中断。 */
+  imageRenameRunning: boolean;
   /** 文件树里复制或剪切的条目。 */
   fileClipboard: FileClipboard | null;
   /** 搜索结果预览页，null 表示没有打开。 */
@@ -129,6 +131,8 @@ export interface AppState {
   mergeTreeNode: (loaded: TreeNode) => void;
   setFilePath: (path: string | null) => void;
   setDirty: (dirty: boolean) => void;
+  markTabsDirty: (paths: string[]) => void;
+  setImageRenameRunning: (running: boolean) => void;
   /** 在当前页签右侧加入页签；已存在时不变。 */
   openTab: (path: string) => void;
   removeTab: (path: string) => void;
@@ -181,6 +185,7 @@ export const useAppStore = create<AppState>((set) => ({
   indexVersion: 0,
   apiKey: "",
   status: "",
+  imageRenameRunning: false,
   fileClipboard: null,
   preview: null,
 
@@ -197,6 +202,11 @@ export const useAppStore = create<AppState>((set) => ({
       dirty,
       tabs: state.tabs.map((tab) => (tab.path === state.filePath ? { ...tab, dirty } : tab)),
     })),
+  markTabsDirty: (paths) => set((state) => ({
+    dirty: state.dirty || (state.filePath !== null && paths.includes(state.filePath)),
+    tabs: state.tabs.map((tab) => paths.includes(tab.path) ? { ...tab, dirty: true } : tab),
+  })),
+  setImageRenameRunning: (imageRenameRunning) => set({ imageRenameRunning }),
   openTab: (path) =>
     set((state) => {
       if (state.tabs.some((tab) => tab.path === path)) {
