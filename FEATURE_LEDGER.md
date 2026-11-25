@@ -344,6 +344,12 @@ foreach ($step in 'save','reopen','style','full','skip','plain') {
 
 - DC-086：编辑区 Ctrl+F 新增当前 Markdown 正文搜索，含未保存的内容；支持命中计数、高亮、前后循环定位、Enter/Shift+Enter、F3/Shift+F3、Esc 返回编辑，定位时展开收拢章节与 details。搜索按可编辑正文文本进行，不搜索图片地址、公式源码等原子节点属性，不跨段落或图片/公式；高亮用 ProseMirror 装饰，查询与定位不写入 Markdown、不进入撤销历史、不改变未保存状态。左侧栏及其他非文档区域沿用工作区搜索，自定义快捷键继续使用原绑定 ID。TypeScript/Vite、MSVC Release 与 NSIS 构建通过，0.4.5 试用安装包已更新；未运行测试及原生界面验收。
 
+## 2026-11-25 Markdown 文档间复制图文（DC-044、DC-053，Must）
+
+- 验收条件：通过快捷键或右键复制、剪切、粘贴图文时保留图片及其位置。同目录粘贴保留相对引用，跨目录粘贴从源文档位置读取图片，导入目标 `assets/` 后写入新的相对引用。目标目录有同名文件时保留原文件，读取失败时保留可排查的原位置并提示。
+- 已实现 · `imageSupport.ts`、`clipboardHtml.ts`、`extensions.ts`、`EditorContextMenu.tsx`、`clipboard.rs`。复制的 HTML 携带相对图片的来源目录，粘贴只改写待插入片段中的图片地址，并在导入结束后一起插入图文。
+- `npm run typecheck`、`cargo check --offline` 通过。未测试，未在 Windows 原生窗口或网络共享中验收。本地安装包记录见 `out/release/build-0.4.5.json`。
+
 ## 2026-11-25 Word/WPS 图文混合粘贴（DC-044、DC-053）
 
 - 右键粘贴读取系统剪贴板的 HTML、纯文本或独立图片，纯文本继续按 Markdown 解析。Ctrl+V 的富文本片段缺少可用图片时，从原生剪贴板补读 HTML。两种入口识别 Office 图片标签，并将可读取的本地临时图片和内嵌图片保存到文档旁的 `assets/`，在原位置使用相对路径。

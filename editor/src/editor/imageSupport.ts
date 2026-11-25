@@ -3,22 +3,29 @@
  *
  * - 粘贴截图等纯图片数据：保存到文档旁的 assets/，以相对路径插入。
  * - 从 Word 或 WPS 粘贴图文：按 HTML 中的位置保留图片，将本地临时文件或内嵌图片保存到 assets/。
+ * - 在编辑器文档间复制图文：剪贴板携带相对图片的来源目录，跨目录粘贴时导入目标 assets/。
  * - 右键「插入图片」：当前文档 assets/ 内的图片直接引用，其他本地图片复制到 assets/ 后插入。
  * - 加载失败的图片标记为缺失，显示「找不到图片」和原路径，代替浏览器默认的破图标。
  */
 
 import { Extension } from "@tiptap/core";
-import type { Node as PMNode, Slice } from "@tiptap/pm/model";
+import { Fragment, Slice, type Node as PMNode } from "@tiptap/pm/model";
 import { NodeSelection, Plugin, PluginKey, TextSelection } from "@tiptap/pm/state";
 import { isHistoryTransaction } from "@tiptap/pm/history";
 import type { EditorView } from "@tiptap/pm/view";
 import { open } from "@tauri-apps/plugin-dialog";
 import { readText as readClipboardText } from "@tauri-apps/plugin-clipboard-manager";
-import { clipboardReadEditor, errorText, importImage, storeImage } from "../backend";
+import { clipboardReadEditor, clipboardWriteEditor, errorText, importImage, storeImage } from "../backend";
 import { fileName, joinPath, parentDirectory } from "../paths";
 import { useAppStore } from "../store";
 import { absoluteLocalPath, getDocumentDirectory } from "./assets";
-import { INLINE_IMAGE_DATA, normalizeOfficeImages, prepareNativeClipboardHtml } from "./clipboardHtml";
+import {
+  annotateCopiedImages,
+  INLINE_IMAGE_DATA,
+  normalizeOfficeImages,
+  prepareNativeClipboardHtml,
+  resolveCopiedImages,
+} from "./clipboardHtml";
 import { getEditor, insertMarkdown } from "./editorHandle";
 import { imageReferencePath, normalizeRenamedImages, registerImageImport } from "./imageReferences";
 
@@ -40,6 +47,58 @@ function currentDocument(): string | null {
 
 function setStatus(message: string): void {
   useAppStore.getState().setStatus(message);
+}
+
+/** 让快捷键和右键菜单使用相同的富文本剪贴板格式。 */
+function serializeEditorSelection(view: EditorView): { html: string; text: string } {
+  const { dom, text } = view.serializeForClipboard(view.state.selection.content());
+  annotateCopiedImages(dom, getDocumentDirectory());
+  return { html: dom.innerHTML, text };
+}
+
+function cutSelection(view: EditorView): void {
+  view.dispatch(view.state.tr.deleteSelection().scrollIntoView().setMeta("uiEvent", "cut"));
+}
+
+function handleCopy(view: EditorView, event: ClipboardEvent): boolean {
+  const clipboard = event.clipboardData;
+  const cut = event.type === "cut";
+  if (!clipboard || view.state.selection.empty || (cut && !view.editable)) {
+    return false;
+  }
+  const { html, text } = serializeEditorSelection(view);
+  clipboard.clearData();
+  clipboard.setData("text/html", html);
+  clipboard.setData("text/plain", text);
+  event.preventDefault();
+  if (cut) {
+    cutSelection(view);
+  }
+  return true;
+}
+
+/** 菜单复制和剪切写入系统富文本剪贴板，剪切只在原选区仍有效时删除。 */
+export async function copyEditorSelection(cut: boolean): Promise<void> {
+  const view = getEditor()?.view;
+  if (!view || view.state.selection.empty || (cut && !view.editable)) {
+    return;
+  }
+  const state = view.state;
+  const document = currentDocument();
+  try {
+    const { html, text } = serializeEditorSelection(view);
+    await clipboardWriteEditor(html, text);
+    if (cut) {
+      if (!sameSelection(view, document, state)) {
+        setStatus("已复制，原选区已变化，请重新剪切。");
+        return;
+      }
+      view.focus();
+      cutSelection(view);
+    }
+  } catch (error) {
+    setStatus(errorText(error));
+  }
 }
 
 /**
@@ -98,7 +157,7 @@ async function insertClipboardImages(files: File[]): Promise<void> {
 /** 收集需要保存到 assets/ 的临时图片地址或内嵌图片数据。 */
 function importableSources(slice: Slice): string[] {
   const sources = new Set<string>();
-  slice.content.descendants((node: PMNode) => {
+  slice.content.descendants((node) => {
     if (!IMAGE_NODE_TYPES.has(node.type.name)) {
       return true;
     }
@@ -111,18 +170,20 @@ function importableSources(slice: Slice): string[] {
   return [...sources];
 }
 
-/** 把文档中 src 等于 from 的图片节点改为 to。 */
-function replaceImageSource(view: EditorView, from: string, to: string): void {
-  const transaction = view.state.tr;
-  view.state.doc.descendants((node, position) => {
-    if (IMAGE_NODE_TYPES.has(node.type.name) && node.attrs.src === from) {
-      transaction.setNodeMarkup(position, undefined, { ...node.attrs, src: to });
+/** 只更新待插入的片段，已有正文中相同地址的图片保持原样。 */
+function replaceFragmentImageSources(fragment: Fragment, references: Map<string, string>): Fragment {
+  const nodes: PMNode[] = [];
+  fragment.forEach((node) => {
+    if (IMAGE_NODE_TYPES.has(node.type.name)) {
+      const source = references.get(String(node.attrs.src ?? ""));
+      if (source) {
+        nodes.push(node.type.create({ ...node.attrs, src: source }, node.content, node.marks));
+        return;
+      }
     }
-    return true;
+    nodes.push(node.isLeaf ? node : node.copy(replaceFragmentImageSources(node.content, references)));
   });
-  if (transaction.docChanged) {
-    view.dispatch(transaction);
-  }
+  return Fragment.fromArray(nodes);
 }
 
 /** 内嵌图片按剪贴板数据保存，本地文件沿用导入与复用规则。 */
@@ -144,30 +205,37 @@ async function savePastedSource(document: string, source: string): Promise<strin
   return importImage(document, absolute);
 }
 
-/** 将粘贴的本地图片整理为 assets/ 相对引用，目录内已有图片直接复用；失败时保留原地址并提示。 */
-async function localizePastedImages(view: EditorView, document: string, sources: string[]): Promise<void> {
-  let localized = 0;
+/** 图片导入完毕后一次性插入图文，让图片路径与正文一起撤销。 */
+async function pasteWithImportedImages(
+  view: EditorView,
+  document: string,
+  slice: Slice,
+  sources: string[],
+): Promise<void> {
+  const state = view.state;
+  const references = new Map<string, string>();
   let failed = 0;
   for (const source of sources) {
     try {
       const relativePath = await savePastedSource(document, source);
-      if (currentDocument() !== document || getEditor()?.view !== view) {
-        setStatus("图片已保存，但当前文档已切换，请返回原文档重新插入。");
-        return;
-      }
       const savedPath = joinPath(parentDirectory(document), relativePath);
       registerImageImport(savedPath);
-      replaceImageSource(view, source, imageReferencePath(document, savedPath));
-      localized += 1;
+      references.set(source, imageReferencePath(document, savedPath));
     } catch {
       failed += 1;
     }
+    if (!sameSelection(view, document, state)) {
+      setStatus("导入图片时粘贴位置已变化，请重新粘贴。");
+      return;
+    }
   }
+  const content = replaceFragmentImageSources(slice.content, references);
+  insertPastedSlice(view, new Slice(content, slice.openStart, slice.openEnd));
   if (failed > 0) {
-    setStatus(`已整理 ${localized} 张图片的 assets/ 引用，${failed} 张处理失败，保留原地址。`);
+    setStatus(`已导入 ${references.size} 张图片，${failed} 张导入失败，保留原地址。`);
     return;
   }
-  setStatus(`已整理 ${localized} 张图片的 assets/ 引用`);
+  setStatus(`已导入 ${references.size} 张图片到 assets/`);
 }
 
 function hasUsableImage(slice: Slice): boolean {
@@ -184,9 +252,14 @@ function hasUsableImage(slice: Slice): boolean {
   return found;
 }
 
-function samePasteTarget(view: EditorView, document: string | null, state: EditorView["state"]): boolean {
+function sameSelection(view: EditorView, document: string | null, state: EditorView["state"]): boolean {
   return getEditor()?.view === view && view.editable && currentDocument() === document
     && view.state.doc === state.doc && view.state.selection.eq(state.selection);
+}
+
+function insertPastedSlice(view: EditorView, slice: Slice): void {
+  const transaction = view.state.tr.replaceSelection(slice).scrollIntoView();
+  view.dispatch(transaction.setMeta("paste", true).setMeta("uiEvent", "paste"));
 }
 
 /** WebView 的富文本有时缺少图片，用同一份系统剪贴板里的 Office 图片标记补回。 */
@@ -206,7 +279,7 @@ async function recoverNativeImages(view: EditorView, slice: Slice, browserText: 
   } catch {
     // 原生读取失败时保持浏览器已经解析出的内容。
   }
-  if (!samePasteTarget(view, document, state)) {
+  if (!sameSelection(view, document, state)) {
     if (getEditor()?.view === view && currentDocument() === document) {
       setStatus("读取图文时编辑位置已变化，请重新粘贴。");
     }
@@ -216,8 +289,7 @@ async function recoverNativeImages(view: EditorView, slice: Slice, browserText: 
     return;
   }
   if (slice.size > 0) {
-    const transaction = view.state.tr.replaceSelection(slice).scrollIntoView();
-    view.dispatch(transaction.setMeta("paste", true).setMeta("uiEvent", "paste"));
+    insertPastedSlice(view, slice);
   }
 }
 
@@ -234,12 +306,8 @@ function handlePaste(view: EditorView, event: ClipboardEvent, slice: Slice): boo
   const sources = importableSources(slice);
   const document = currentDocument();
   if (document && sources.length > 0) {
-    // 等默认粘贴写入文档后再改写地址。
-    queueMicrotask(() => {
-      if (currentDocument() === document && getEditor()?.view === view) {
-        void localizePastedImages(view, document, sources);
-      }
-    });
+    void pasteWithImportedImages(view, document, slice, sources);
+    return true;
   }
   const browserText = data?.getData("text/plain") ?? "";
   if (event.isTrusted && html && browserText && richClipboardSlices.has(slice) && !hasUsableImage(slice)) {
@@ -263,7 +331,7 @@ export async function pasteFromSystemClipboard(): Promise<void> {
     if (!clipboard.html && !clipboard.image && !text) {
       text = await readClipboardText();
     }
-    if (!samePasteTarget(view, document, state)) {
+    if (!sameSelection(view, document, state)) {
       return;
     }
     view.focus();
@@ -312,7 +380,11 @@ export const imageSupportExtension = Extension.create({
       new Plugin({
         key: imageSupportKey,
         props: {
-          transformPastedHTML: normalizeOfficeImages,
+          handleDOMEvents: { copy: handleCopy, cut: handleCopy },
+          transformPastedHTML(html) {
+            const normalized = normalizeOfficeImages(html);
+            return resolveCopiedImages(normalized, getDocumentDirectory());
+          },
           transformPasted(slice, _view, plain) {
             if (!plain) {
               richClipboardSlices.add(slice);

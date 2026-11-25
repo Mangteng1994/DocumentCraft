@@ -7,13 +7,12 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ChevronRight } from "lucide-react";
-import { writeText as writeClipboard } from "@tauri-apps/plugin-clipboard-manager";
 import { useSettings } from "../settings/settingsStore";
 import type { ActionId } from "../settings/schema";
 import { useAppStore } from "../store";
 import { iconSize } from "../styles/tokens";
 import { useCopilot } from "../features/copilot/copilotStore";
-import { chooseAndInsertImage, pasteFromSystemClipboard } from "./imageSupport";
+import { chooseAndInsertImage, copyEditorSelection, pasteFromSystemClipboard } from "./imageSupport";
 import { addSelectionToChat } from "../features/copilot/actions";
 import { anchorFromSelection } from "./annotations";
 import { currentSelection, isInTable, runTableAction, type TableAction } from "./editorCommands";
@@ -133,19 +132,9 @@ export function EditorContextMenu() {
   }
 
   const editor = getEditor();
-  const selection = currentSelection();
-  const hasSelection = selection !== null;
+  const hasSelection = !!editor && !editor.state.selection.empty;
+  const hasTextSelection = currentSelection() !== null;
   const inTable = isInTable();
-
-  const copySelection = async (cut: boolean) => {
-    if (!selection || !editor) {
-      return;
-    }
-    await writeClipboard(selection.text);
-    if (cut) {
-      editor.chain().focus().deleteSelection().run();
-    }
-  };
 
   const addComment = () => {
     if (!editor) {
@@ -163,15 +152,15 @@ export function EditorContextMenu() {
 
   const copilotMenu: MenuEntry[] = [
     { label: "Quick Ask", hotkey: "quickAsk", run: () => setOverlay({ kind: "quickAsk" }) },
-    { label: "添加选区到对话", hotkey: "addSelectionToChat", disabled: !hasSelection, run: addSelectionToChat },
+    { label: "添加选区到对话", hotkey: "addSelectionToChat", disabled: !hasTextSelection, run: addSelectionToChat },
   ];
   if (commandItems.length > 0) {
     copilotMenu.push("separator", ...commandItems);
   }
 
   const entries: MenuEntry[] = [
-    { label: "剪切", disabled: !hasSelection, run: () => void copySelection(true) },
-    { label: "复制", disabled: !hasSelection, run: () => void copySelection(false) },
+    { label: "剪切", disabled: !hasSelection, run: () => void copyEditorSelection(true) },
+    { label: "复制", disabled: !hasSelection, run: () => void copyEditorSelection(false) },
     { label: "粘贴", run: () => void pasteFromSystemClipboard() },
     { label: "全选", run: () => editor?.chain().focus().selectAll().run() },
     "separator",
@@ -181,7 +170,7 @@ export function EditorContextMenu() {
   if (inTable) {
     entries.push({ label: "表格", submenu: TABLE_ITEMS.map((item) => ({ label: item.label, run: () => runTableAction(item.action) })) });
   }
-  entries.push("separator", { label: "添加批注", disabled: !hasSelection, run: addComment }, { label: "Copilot", submenu: copilotMenu });
+  entries.push("separator", { label: "添加批注", disabled: !hasTextSelection, run: addComment }, { label: "Copilot", submenu: copilotMenu });
 
   return (
     <div
