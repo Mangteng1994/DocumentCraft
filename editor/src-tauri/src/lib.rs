@@ -115,6 +115,7 @@ pub fn run() {
             fileops::rename_entry,
             clipboard::clipboard_write_files,
             clipboard::clipboard_read_files,
+            clipboard::clipboard_read_editor,
             clipboard::clipboard_clear,
             preview::preview_file,
             images::store_image,

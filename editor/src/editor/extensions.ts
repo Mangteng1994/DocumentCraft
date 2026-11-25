@@ -297,7 +297,7 @@ export function createExtensions() {
     simpleMark("subscript", "sub"),
     simpleMark("superscript", "sup"),
     simpleMark("highlight", "mark"),
-    InlineImage,
+    InlineImage.configure({ allowBase64: true }),
     BlockImage,
     Table.configure({ resizable: false }),
     TableRow,

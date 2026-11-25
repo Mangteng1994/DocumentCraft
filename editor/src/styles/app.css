@@ -626,6 +626,13 @@ textarea {
 
 /* 大纲（类名对应 VMark outline-*） */
 
+.dc-outline {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
 .dc-outline-filter {
   display: flex;
   align-items: center;
@@ -635,6 +642,10 @@ textarea {
   border: var(--dc-border);
   border-radius: var(--dc-radius-md);
   background: var(--dc-color-surface-raised);
+}
+
+.dc-outline > .dc-outline-filter {
+  flex-shrink: 0;
 }
 
 .dc-outline-filter-icon {
@@ -654,6 +665,9 @@ textarea {
 }
 
 .dc-outline-tree {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
   padding: 0 var(--dc-space-sm) var(--dc-space-lg);
 }
 

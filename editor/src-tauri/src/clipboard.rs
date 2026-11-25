@@ -1,4 +1,4 @@
-//! 系统剪贴板里的文件列表（DC-069）。
+//! 系统剪贴板里的文件列表与编辑器粘贴数据（DC-069、DC-053）。
 //!
 //! 文件树的复制、剪切要写入系统剪贴板，资源管理器、桌面和其他程序才能粘贴；
 //! 在资源管理器里复制或剪切的文件，也要能粘贴到文件树里。Windows 用两种剪贴板格式配合：
@@ -13,6 +13,20 @@ use serde::Serialize;
 pub struct ClipboardFiles {
     pub paths: Vec<String>,
     pub cut: bool,
+}
+
+/// 从同一次剪贴板读取取得的编辑器内容。图片字节只在没有 HTML 和正文时返回。
+#[derive(Serialize, Default)]
+pub struct EditorClipboard {
+    text: String,
+    html: String,
+    image: Option<ClipboardImage>,
+}
+
+#[derive(Serialize)]
+struct ClipboardImage {
+    mime: &'static str,
+    bytes: Vec<u8>,
 }
 
 /// DROPFILES 结构：偏移 0 的 u32 是路径列表起点，偏移 16 的 u32 非 0 表示路径是 UTF-16。
@@ -76,7 +90,8 @@ pub fn decode_drop_files(bytes: &[u8]) -> Vec<String> {
 #[cfg(windows)]
 mod platform {
     use super::{decode_drop_files, encode_drop_files, ClipboardFiles, DROP_EFFECT_COPY, DROP_EFFECT_MOVE};
-    use clipboard_win::{formats, raw, Clipboard};
+    use super::{ClipboardImage, EditorClipboard};
+    use clipboard_win::{formats, raw, Clipboard, Getter};
 
     /// 别的程序正占着剪贴板时重试的次数；每次间隔由库内部等待。
     const OPEN_ATTEMPTS: usize = 10;
@@ -118,6 +133,46 @@ mod platform {
         Ok(ClipboardFiles { paths, cut })
     }
 
+    /// 在一次打开期间读取对应的原生 HTML 和文本，保留 WebView 可能滤掉的 Office 标签。
+    pub fn read_editor(include_image: bool) -> Result<EditorClipboard, String> {
+        let _clipboard = open()?;
+        let mut contents = EditorClipboard::default();
+        if raw::is_format_avail(formats::CF_UNICODETEXT) {
+            formats::Unicode.read_clipboard(&mut contents.text)
+                .map_err(|error| format!("无法读取剪贴板文字：{error}"))?;
+        }
+        if let Some(format) = formats::Html::new() {
+            if raw::is_format_avail(format.code()) {
+                let mut bytes = Vec::new();
+                if format.read_clipboard(&mut bytes).is_ok() {
+                    contents.html = String::from_utf8_lossy(&bytes).into_owned();
+                }
+            }
+        }
+        // 混合选区可能同时提供整段内容的位图预览，只有单独的图片才使用位图格式。
+        if include_image && contents.text.trim().is_empty() && contents.html.trim().is_empty() {
+            contents.image = read_image()?;
+        }
+        Ok(contents)
+    }
+
+    fn read_image() -> Result<Option<ClipboardImage>, String> {
+        let mut bytes = Vec::new();
+        if let Some(png) = raw::register_format("PNG") {
+            if raw::is_format_avail(png.get()) {
+                raw::get_vec(png.get(), &mut bytes)
+                    .map_err(|error| format!("无法读取剪贴板 PNG：{error}"))?;
+                return Ok(Some(ClipboardImage { mime: "image/png", bytes }));
+            }
+        }
+        if raw::is_format_avail(formats::CF_BITMAP) {
+            formats::Bitmap.read_clipboard(&mut bytes)
+                .map_err(|error| format!("无法读取剪贴板位图：{error}"))?;
+            return Ok(Some(ClipboardImage { mime: "image/bmp", bytes }));
+        }
+        Ok(None)
+    }
+
     pub fn clear() -> Result<(), String> {
         let _clipboard = open()?;
         raw::empty().map_err(|error| format!("无法清空剪贴板：{error}"))
@@ -126,7 +181,7 @@ mod platform {
 
 #[cfg(not(windows))]
 mod platform {
-    use super::ClipboardFiles;
+    use super::{ClipboardFiles, EditorClipboard};
 
     pub fn write_files(_paths: &[String], _cut: bool) -> Result<(), String> {
         Err("系统剪贴板的文件列表目前只支持 Windows。".to_string())
@@ -134,6 +189,10 @@ mod platform {
 
     pub fn read_files() -> Result<ClipboardFiles, String> {
         Ok(ClipboardFiles::default())
+    }
+
+    pub fn read_editor(_include_image: bool) -> Result<EditorClipboard, String> {
+        Ok(EditorClipboard::default())
     }
 
     pub fn clear() -> Result<(), String> {
@@ -155,6 +214,13 @@ pub async fn clipboard_write_files(paths: Vec<String>, cut: bool) -> Result<(), 
 #[tauri::command]
 pub async fn clipboard_read_files() -> Result<ClipboardFiles, String> {
     let task = tauri::async_runtime::spawn_blocking(platform::read_files);
+    task.await.map_err(|error| error.to_string())?
+}
+
+/// 读取 Windows 剪贴板中的编辑内容，供显式粘贴操作调用。
+#[tauri::command]
+pub async fn clipboard_read_editor(include_image: bool) -> Result<EditorClipboard, String> {
+    let task = tauri::async_runtime::spawn_blocking(move || platform::read_editor(include_image));
     task.await.map_err(|error| error.to_string())?
 }
 

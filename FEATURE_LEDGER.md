@@ -31,7 +31,7 @@
 | DC-028 | 工作区 AI 整理 | 本地检索工作区 Markdown，查看摘录后提交给已配置 AI，整理稿可跳回来源文件 | 已被 DC-034 取代 · 检索与整理逻辑保留在 `reader_assistant.py` |
 | DC-029 | VMark 精简编辑器外壳 | Tauri 2 + React + TipTap 窗口，打开工作区和 Markdown，所见即所得编辑并保存；Markdown 往返沿用 VMark 管线；VMark 的终端、MCP、浏览器、多格式、多窗口等功能不进入应用 | 部分验收 · `editor/`。`tauri dev` 编译并启动窗口；Markdown 往返、保存与未保存提示经浏览器模拟验收；原生窗口内未逐项点击 |
 | DC-030 | 文件树 | 侧栏显示工作区目录树，跳过隐藏目录与链接，点击 Markdown 打开，可刷新 | 已验收（模拟 IPC + Rust 测试） · `FileTree.tsx`、`workspace.rs` |
-| DC-031 | 文档大纲 | 侧栏按标题层级显示可折叠大纲，支持过滤，点击跳到对应标题 | 已验收（模拟 IPC） · `OutlineView.tsx`：层级、过滤与点击跳转 |
+| DC-031 | 文档大纲 | 侧栏按标题层级显示可折叠大纲，支持过滤，点击跳到对应标题。点击正文时高亮所属标题；子标题折叠时定位到可见上级；目标已可见时不滚动，越界时只滚动到最近的可见位置 | 层级、过滤与点击跳转此前已验收（模拟 IPC）；正文联动已实现于 `MarkdownEditor.tsx`、`store.ts`、`OutlineView.tsx`、`app.css`。TypeScript 静态检查通过，未测试 |
 | DC-032 | 编辑器内导出 Word | 从「设置 → MD 转 Word」把当前文档按样式或完整模板导出 DOCX，默认模板与模式可保存，可选包含批注；已有输出受保护 | 已实现 · 入口移至设置 · `editor/src/features/settings/WordExportSettings.tsx` → `docflow md-to-word --with-notes`；设置页经模拟 IPC 验收，导出逻辑沿用此前实跑结果 |
 | DC-033 | 编辑器批注 | 选中正文添加批注，侧栏列出并定位；批注按原文与前后文锚定，编辑后重新定位，无法定位的标记为待定位；数据沿用 `.documentcraft/reader-spike.sqlite3` | 已验收（CLI 实跑 + 模拟 IPC） · `annotations.ts`、`CommentsPanel.tsx`、`docflow notes` |
 | DC-034 | Copilot 工作区整理 | 交互对应 Obsidian Copilot 的 Quick Chat：流式回答与停止；当前笔记、选区、[[笔记]] 与 + / @ 添加的上下文；/ 命令；对话与工作区检索两种模式；消息复制、编辑、插入或替换、重新生成、删除；对话自动保存与历史；AI 连接沿用已有配置 | 已验收（模拟 IPC） · `editor/src/features/copilot/`、`docflow chat`；流式对话经本地假 API 实跑，真实 AI 服务未请求 |
@@ -42,7 +42,7 @@
 | DC-041 | Obsidian 配色与布局 | 浅色、深色两套 Obsidian 默认主题配色，可跟随系统；Ribbon、左右侧栏、视图标题和状态栏布局参照 Obsidian | 已验收（模拟 IPC） · `editor/src/styles/tokens.css`、`settings/theme.ts` |
 | DC-042 | 设置入口 | 左侧导航分组的设置窗口：外观、快捷键、Copilot、AI 连接、MD 转 Word、科研流程图；设置持久化 | 已验收（模拟 IPC） · `editor/src/features/settings/`、`src-tauri/src/settings.rs` |
 | DC-043 | 编辑快捷键 | 默认 Ctrl+1～6 为 1～6 级标题、Ctrl+0 为正文段落、Ctrl+T 插入表格；全部快捷键可录制、清除、恢复默认，冲突时提示并移除原绑定 | 已验收（模拟 IPC，真实按键） · `editor/src/settings/` |
-| DC-044 | 编辑区右键菜单与插入表格 | 右键菜单含剪切、复制、粘贴、全选、插入表格、表格增删行列、添加批注和 Copilot 子菜单；插入表格可在网格中选择行列数，首行为表头 | 已验收（模拟 IPC） · `editor/src/editor/EditorContextMenu.tsx`、`InsertTablePicker.tsx` |
+| DC-044 | 编辑区右键菜单与插入表格 | 右键菜单含剪切、复制、粘贴、全选、插入表格、表格增删行列、添加批注和 Copilot 子菜单；插入表格可在网格中选择行列数，首行为表头；右键粘贴支持富文本与图片，纯文本仍按 Markdown 解析 | 此前已验收（模拟 IPC） · `EditorContextMenu.tsx`、`InsertTablePicker.tsx`；右键粘贴修订已实现于 `imageSupport.ts`、`clipboard.rs`，未测试 |
 | DC-045 | Copilot 命令与 Quick Ask | 命令以 Markdown 保存在 copilot-custom-prompts/，格式与 Obsidian Copilot 相同，可生成默认命令；右键或快捷键打开 Quick Ask，结果可复制、插入、替换选区或追问 | 已验收（模拟 IPC） · `editor/src/features/copilot/` |
 | DC-046 | 显示所有文件 | 「设置 → 文件」可开启显示所有文件：目录树列出工作区内全部文件和空文件夹（隐藏目录仍不显示），非 Markdown 文件置灰、点击用系统默认应用打开（DC-052）；默认关闭，保持只显示 Markdown | 已验收（模拟 IPC）· `editor/src/features/settings/FilesSettings.tsx`、`src-tauri/src/workspace.rs` 的 `list_tree(show_all)`；Rust 测试覆盖 |
 | DC-047 | 目录树新建 Markdown 与文件夹 | 文件栏头部有「新建 Markdown」「新建文件夹」按钮，在最近点击的文件夹（默认工作区根目录）下输入名称创建；Markdown 缺扩展名时补 .md 并打开；同名、含非法字符的名称被拒绝且不覆盖；默认视图中完全空的文件夹也保留 | 已验收（模拟 IPC）· `editor/src/sidebar/FileTree.tsx`、`documentActions.ts`、`workspace.rs` 的 `create_markdown`/`create_folder`；Rust 测试覆盖 |
@@ -50,7 +50,7 @@
 | DC-049 | 最近打开的文件夹 | 欢迎页列出最近打开的工作区（最多 10 个，最新在前），点击直接打开，× 只从列表移除；记录保存在编辑器设置中 | 已验收（模拟 IPC）· `editor/src/components/RecentWorkspaces.tsx`、`documentActions.ts`、`settings/schema.ts` 的 `history` |
 | DC-050 | 标题级别显示 | 编辑区每个标题左侧显示 H1～H6，大纲每行显示级别；h4～h6 字号区分，h6 用次要文字色 | 已验收（模拟 IPC）· `editor/src/styles/app.css`、`tokens.css`、`sidebar/OutlineView.tsx` |
 | DC-051 | 工作区文档搜索 | 焦点在侧栏等非编辑区域时，`Ctrl+F` 在侧栏顶部（标签栏下方）出现搜索框，在当前工作区所有 Markdown 中按文件名和正文搜索（不区分大小写）；有关键词时结果替换目录树，按文件分组，显示行号与带高亮的上下文；点击结果打开文档并选中对应文字；Esc 或 × 关闭搜索并恢复目录树；侧栏只有「文件」「大纲」两个标签；隐藏目录不搜索，结果数量有上限并提示 | 此前已验收（模拟 IPC + Rust 测试）；本轮焦点分发调整已实现，未测试 · `editor/src/sidebar/SearchView.tsx`（`SearchBar`、`SearchResults`）、`Sidebar.tsx`、`store.ts` 的 `searchOpen`；默认快捷键由 `Ctrl+Shift+F` 改为 `Ctrl+F`，设置读取时迁移旧默认值 |
-| DC-053 | 图片插入与显示 | `file:///` 与本地绝对路径的图片正常显示；找不到的图片显示「找不到图片」占位和原路径；粘贴截图或图片、右键「插入图片」时把图片保存到文档旁的 `assets/` 并以相对路径插入；粘贴内容中引用本地临时文件的图片在粘贴时复制到 `assets/`；不覆盖已有文件；插入或粘贴引用当前文档旁 `assets/` 及子目录的图片时复用原文件、保留名称，不生成副本；其他位置的图片继续复制，含空格与括号的路径可正常插入 | 此前已验收（模拟 IPC + Rust 测试）；本轮 assets 复用修复已实现并打包 0.4.5，未测试 · `editor/src/editor/imageSupport.ts`、`assets.ts`、`src-tauri/src/images.rs`；不能找回已被清理的临时图片 |
+| DC-053 | 图片插入与显示 | `file:///` 与本地绝对路径的图片正常显示；找不到的图片显示「找不到图片」占位和原路径；粘贴截图或图片、右键「插入图片」时把图片保存到文档旁的 `assets/` 并以相对路径插入；Word/WPS 图文混合粘贴时保留可读取的图片及原位置，识别剪贴板 HTML 中的 Office 图片标签并导入临时图片；不覆盖已有文件；插入或粘贴引用当前文档旁 `assets/` 及子目录的图片时复用原文件、保留名称，不生成副本；其他位置的图片继续复制，含空格与括号的路径可正常插入 | 此前已验收（模拟 IPC + Rust 测试）；assets 复用已实现并打包 0.4.5，未测试；本轮混合粘贴已实现于 `imageSupport.ts`、`clipboardHtml.ts`、`clipboard.rs`，未测试；仅在剪贴板 HTML 含可读取的图片数据或本地文件地址时恢复图文位置 |
 | DC-054 | 多文档页签 | 编辑区顶部为页签栏，打开文档时新增或切换页签；每个页签保留各自内容、撤销历史与未保存状态；页签可关闭（未保存时询问），Ctrl+W 关闭、Ctrl+Tab / Ctrl+Shift+Tab 切换；关闭窗口时检查所有页签 | 已验收（模拟 IPC）· `editor/src/components/DocumentTabs.tsx`、`documentActions.ts` 的页签现场、`editorHandle.ts` 的 `snapshotDocument`/`restoreDocument` |
 | DC-055 | 侧栏宽度拖动 | 左侧栏与右侧栏边缘可拖动调整宽度，有最小和最大宽度，双击恢复默认；宽度保存在设置中，重启后保留 | 已验收（模拟 IPC）· `editor/src/components/PaneResizer.tsx`、`settings/schema.ts` 的 `layout`、`tokens.ts` 的 `paneWidth` |
 | DC-056 | 状态栏工作区切换 | 状态栏左侧只显示当前工作区文件夹名，悬停显示完整路径；点击弹出最近打开的工作区列表，选择后切换，也可打开其他文件夹 | 已验收（模拟 IPC）· `editor/src/components/WorkspaceSwitcher.tsx` |
@@ -343,3 +343,8 @@ foreach ($step in 'save','reopen','style','full','skip','plain') {
 - DC-085：新增图片浮窗重命名，按用户选择同步整个工作区及已打开页签的引用。重命名保留扩展名，改写标准行内图片、引用式定义及链接；代码块、元数据和普通文字不参与改写。改名期间等待已有保存并暂停新保存、关闭窗口和安装更新；回写前核对原文并持有独占句柄，异常时尝试恢复并明确列出恢复失败项。扫描跳过隐藏条目与链接，最多 100 万条目、60 秒、128 MiB Markdown，超限或文件无法读取时整体中止，不执行部分扫描的改名。TypeScript/Vite、MSVC Release 和 NSIS 构建通过，0.4.5 试用安装包已更新；按用户约定未执行功能测试、恢复故障演练及原生界面验收。
 
 - DC-086：编辑区 Ctrl+F 新增当前 Markdown 正文搜索，含未保存的内容；支持命中计数、高亮、前后循环定位、Enter/Shift+Enter、F3/Shift+F3、Esc 返回编辑，定位时展开收拢章节与 details。搜索按可编辑正文文本进行，不搜索图片地址、公式源码等原子节点属性，不跨段落或图片/公式；高亮用 ProseMirror 装饰，查询与定位不写入 Markdown、不进入撤销历史、不改变未保存状态。左侧栏及其他非文档区域沿用工作区搜索，自定义快捷键继续使用原绑定 ID。TypeScript/Vite、MSVC Release 与 NSIS 构建通过，0.4.5 试用安装包已更新；未运行测试及原生界面验收。
+
+## 2026-11-25 Word/WPS 图文混合粘贴（DC-044、DC-053）
+
+- 右键粘贴读取系统剪贴板的 HTML、纯文本或独立图片，纯文本继续按 Markdown 解析。Ctrl+V 的富文本片段缺少可用图片时，从原生剪贴板补读 HTML。两种入口识别 Office 图片标签，并将可读取的本地临时图片和内嵌图片保存到文档旁的 `assets/`，在原位置使用相对路径。
+- `npm run typecheck`、`cargo check --offline` 通过。未测试，未用真实 Word/WPS 剪贴板验收，未更新安装包。
