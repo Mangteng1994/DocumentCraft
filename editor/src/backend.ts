@@ -325,6 +325,11 @@ export function clipboardReadEditor(includeImage: boolean): Promise<{
   return invoke("clipboard_read_editor", { includeImage });
 }
 
+/** 一次写入富文本与纯文本，供编辑区右键复制和剪切使用。 */
+export function clipboardWriteEditor(html: string, text: string): Promise<void> {
+  return invoke<void>("clipboard_write_editor", { html, text });
+}
+
 /** 清空系统剪贴板。 */
 export function clipboardClear(): Promise<void> {
   return invoke<void>("clipboard_clear");

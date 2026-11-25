@@ -91,7 +91,7 @@ pub fn decode_drop_files(bytes: &[u8]) -> Vec<String> {
 mod platform {
     use super::{decode_drop_files, encode_drop_files, ClipboardFiles, DROP_EFFECT_COPY, DROP_EFFECT_MOVE};
     use super::{ClipboardImage, EditorClipboard};
-    use clipboard_win::{formats, raw, Clipboard, Getter};
+    use clipboard_win::{formats, options, raw, Clipboard, Getter, Setter};
 
     /// 别的程序正占着剪贴板时重试的次数；每次间隔由库内部等待。
     const OPEN_ATTEMPTS: usize = 10;
@@ -156,6 +156,25 @@ mod platform {
         Ok(contents)
     }
 
+    /// 在同一次打开期间写入 Windows 富文本和纯文本格式，供编辑区和其他应用粘贴。
+    pub fn write_editor(window: &tauri::Window, html: &str, text: &str) -> Result<(), String> {
+        let format = formats::Html::new()
+            .ok_or_else(|| "无法注册富文本剪贴板格式。".to_string())?;
+        // 清空再写入时使用编辑器窗口作为所有者，让两个格式归属同一个窗口。
+        let owner = window.hwnd().map_err(|error| format!("无法定位剪贴板所有者：{error}"))?;
+        let _clipboard = Clipboard::new_attempts_for(owner.0, OPEN_ATTEMPTS)
+            .map_err(|error| format!("无法打开剪贴板：{error}"))?;
+        raw::empty().map_err(|error| format!("无法清空剪贴板：{error}"))?;
+        format.write_clipboard(&html)
+            .map_err(|error| format!("无法写入剪贴板富文本：{error}"))?;
+        // 两种格式需要同时保留，写入纯文本时避免再次清空剪贴板。
+        if !text.is_empty() {
+            raw::set_string_with(text, options::NoClear)
+                .map_err(|error| format!("无法写入剪贴板文字：{error}"))?;
+        }
+        Ok(())
+    }
+
     fn read_image() -> Result<Option<ClipboardImage>, String> {
         let mut bytes = Vec::new();
         if let Some(png) = raw::register_format("PNG") {
@@ -195,6 +214,10 @@ mod platform {
         Ok(EditorClipboard::default())
     }
 
+    pub fn write_editor(_window: &tauri::Window, _html: &str, _text: &str) -> Result<(), String> {
+        Err("编辑器富文本剪贴板目前只支持 Windows。".to_string())
+    }
+
     pub fn clear() -> Result<(), String> {
         Ok(())
     }
@@ -221,6 +244,17 @@ pub async fn clipboard_read_files() -> Result<ClipboardFiles, String> {
 #[tauri::command]
 pub async fn clipboard_read_editor(include_image: bool) -> Result<EditorClipboard, String> {
     let task = tauri::async_runtime::spawn_blocking(move || platform::read_editor(include_image));
+    task.await.map_err(|error| error.to_string())?
+}
+
+/// 把编辑器选区的 HTML 和纯文本写入 Windows 剪贴板。
+#[tauri::command]
+pub async fn clipboard_write_editor(
+    window: tauri::Window,
+    html: String,
+    text: String,
+) -> Result<(), String> {
+    let task = tauri::async_runtime::spawn_blocking(move || platform::write_editor(&window, &html, &text));
     task.await.map_err(|error| error.to_string())?
 }
 

@@ -105,11 +105,11 @@ function simpleMark(name: string, tag: string) {
 
 /**
  * 图片 src 属性：显示时转成 WebView 可加载的地址，原始路径另存于 data-src。
- * 从编辑区复制再粘贴时按 data-src 取回原始路径，避免把 asset:// 地址写进 Markdown。
+ * 粘贴时按 data-src 读取图片引用，避免把 WebView 加载地址写进 Markdown。
  */
 const imageSourceAttribute = {
   default: "",
-  parseHTML: (element: HTMLElement) => element.getAttribute("data-src") ?? element.getAttribute("src") ?? "",
+  parseHTML: (element: HTMLElement) => element.getAttribute("data-src") ?? element.getAttribute("src"),
   renderHTML: (attributes: Record<string, unknown>) => ({
     src: resolveImageSource(attributes.src),
     "data-src": attributes.src,
@@ -139,6 +139,24 @@ const BlockImage = Node.create({
       alt: { default: "" },
       title: { default: "" },
     };
+  },
+  parseHTML() {
+    return [
+      {
+        tag: "figure.dc-block-image",
+        getAttrs(element) {
+          const image = element.querySelector("img");
+          if (!image) {
+            return false;
+          }
+          return {
+            src: imageSourceAttribute.parseHTML(image),
+            alt: image.getAttribute("alt") ?? "",
+            title: image.getAttribute("title") ?? "",
+          };
+        },
+      },
+    ];
   },
   renderHTML({ HTMLAttributes }) {
     return ["figure", { class: "dc-block-image" }, ["img", HTMLAttributes]];
