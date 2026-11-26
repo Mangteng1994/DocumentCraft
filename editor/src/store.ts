@@ -10,6 +10,8 @@ import type { HeadingItem } from "@vmark/utils/markdownOutline";
 import type { SearchMode } from "./settings/schema";
 
 export type SidebarView = "files" | "outline";
+export type FileTreeExpansionUpdate = (expanded: Set<string>) => Set<string>;
+export const EMPTY_FILE_TREE_EXPANSION = new Set<string>();
 export type RightPanel = "comments" | "copilot" | null;
 export type SettingsTab = "appearance" | "editor" | "files" | "hotkeys" | "copilot" | "ai" | "word" | "figure" | "update";
 
@@ -84,6 +86,8 @@ function replaceTreeNode(node: TreeNode, loaded: TreeNode): TreeNode {
 export interface AppState {
   workspace: string | null;
   tree: TreeNode | null;
+  /** 按工作区保存已展开的目录，文件树被大纲或搜索结果替换时继续保留。 */
+  fileTreeExpanded: Map<string, Set<string>>;
   filePath: string | null;
   dirty: boolean;
   /** 打开的页签，顺序即显示顺序；filePath 为当前页签。 */
@@ -129,6 +133,7 @@ export interface AppState {
 
   setWorkspace: (workspace: string | null, tree: TreeNode | null) => void;
   setTree: (tree: TreeNode | null) => void;
+  setFileTreeExpanded: (workspace: string | null, update: FileTreeExpansionUpdate) => void;
   /** 把按需加载读到的一个文件夹合并进当前目录树。 */
   mergeTreeNode: (loaded: TreeNode) => void;
   setFilePath: (path: string | null) => void;
@@ -192,6 +197,7 @@ function locateOutlineHeading(
 export const useAppStore = create<AppState>((set) => ({
   workspace: null,
   tree: null,
+  fileTreeExpanded: new Map<string, Set<string>>(),
   filePath: null,
   dirty: false,
   tabs: [],
@@ -223,6 +229,16 @@ export const useAppStore = create<AppState>((set) => ({
   // 换工作区后旧的索引进度不再适用。
   setWorkspace: (workspace, tree) => set((state) => ({ workspace, tree, indexProgress: workspace === state.workspace ? state.indexProgress : null })),
   setTree: (tree) => set({ tree }),
+  setFileTreeExpanded: (workspace, update) => set((state) => {
+    if (!workspace) {
+      return state;
+    }
+    // 异步文件操作只更新发起时所在的工作区。
+    const previous = state.fileTreeExpanded.get(workspace) ?? EMPTY_FILE_TREE_EXPANSION;
+    const fileTreeExpanded = new Map(state.fileTreeExpanded);
+    fileTreeExpanded.set(workspace, update(previous));
+    return { fileTreeExpanded };
+  }),
   mergeTreeNode: (loaded) => set((state) => ({ tree: state.tree ? replaceTreeNode(state.tree, loaded) : state.tree })),
   // 大纲折叠键由标题层级、文字和序号组成，换文档后不再适用，随之清空。
   setFilePath: (filePath) => set((state) => {

@@ -17,6 +17,7 @@ export function DocumentSearchBar({ editor }: { editor: Editor | null }) {
   const focusRequest = useDocumentSearch((state) => state.focusRequest);
   const filePath = useAppStore((state) => state.filePath);
   const input = useRef<HTMLInputElement>(null);
+  const previousSearch = useRef<{ editor: Editor; filePath: string | null; open: boolean; query: string } | null>(null);
 
   useEffect(() => {
     if (open) {
@@ -29,6 +30,8 @@ export function DocumentSearchBar({ editor }: { editor: Editor | null }) {
     if (!editor) {
       return;
     }
+    const previous = previousSearch.current;
+    previousSearch.current = { editor, filePath, open, query };
     if (!filePath) {
       closeDocumentSearch(editor);
       return;
@@ -37,7 +40,19 @@ export function DocumentSearchBar({ editor }: { editor: Editor | null }) {
       updateDocumentSearch(editor, "", false);
       return;
     }
-    const timer = window.setTimeout(() => updateDocumentSearch(editor, query), QUERY_DELAY_MS);
+    // 切页签时更新结果即可。只在同一文档打开搜索或输入新词时自动定位。
+    const shouldReveal = previous?.editor === editor && previous.filePath === filePath
+      && (!previous.open || previous.query !== query);
+    if (!shouldReveal) {
+      updateDocumentSearch(editor, query, false);
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      const search = useDocumentSearch.getState();
+      if (useAppStore.getState().filePath === filePath && search.open && search.query === query) {
+        updateDocumentSearch(editor, query);
+      }
+    }, QUERY_DELAY_MS);
     return () => window.clearTimeout(timer);
   }, [editor, filePath, open, query]);
 

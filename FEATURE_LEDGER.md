@@ -344,6 +344,18 @@ foreach ($step in 'save','reopen','style','full','skip','plain') {
 
 - DC-086：编辑区 Ctrl+F 新增当前 Markdown 正文搜索，含未保存的内容；支持命中计数、高亮、前后循环定位、Enter/Shift+Enter、F3/Shift+F3、Esc 返回编辑，定位时展开收拢章节与 details。搜索按可编辑正文文本进行，不搜索图片地址、公式源码等原子节点属性，不跨段落或图片/公式；高亮用 ProseMirror 装饰，查询与定位不写入 Markdown、不进入撤销历史、不改变未保存状态。左侧栏及其他非文档区域沿用工作区搜索，自定义快捷键继续使用原绑定 ID。TypeScript/Vite、MSVC Release 与 NSIS 构建通过，0.4.5 试用安装包已更新；未运行测试及原生界面验收。
 
+## 2026-11-26 文件树展开状态（DC-030，Must）
+
+- 验收条件：在同一工作区从「文件」切到「大纲」再返回，原来展开及折叠的目录保持原状。工作区搜索结果临时替换目录树后，返回「文件」同样保留层级。工作区之间分别保留各自的展开状态。
+- 已实现 · `store.ts` 按工作区保存展开状态，`FileTree.tsx` 挂载时读取当前工作区的状态。`documentActions.ts` 在切换视图后仍复用进行中的按需读取。
+- `npm run typecheck` 通过。未测试。本地安装包记录见 `out/release/build-0.4.5.json`。
+
+## 2026-11-26 长 Markdown 页签阅读位置（DC-054、DC-086，Must）
+
+- 验收条件：鼠标或快捷键切回已打开的长 Markdown 时，回到切走前看到的正文。图片随后加载时仍保持该位置，手动滚动或主动定位后可正常阅读。已开启的 Ctrl+F 随页签刷新计数和高亮，不移动光标或正文，主动输入和前后定位继续可用。
+- 已实现 · `documentViewport.ts`、`editorHandle.ts` 记录视口上缘的正文位置和偏移，随图片加载及排版变化补偿。手动滚动、主动定位或换页签时清理恢复监听。`DocumentSearchBar.tsx`、`documentSearch.ts` 在切页签时只刷新查询结果和装饰。
+- `npm run typecheck` 通过。未测试，未在 Windows 原生窗口验收。本地安装包记录见 `out/release/build-0.4.5.json`。
+
 ## 2026-11-25 Markdown 文档间复制图文（DC-044、DC-053，Must）
 
 - 验收条件：通过快捷键或右键复制、剪切、粘贴图文时保留图片及其位置。同目录粘贴保留相对引用，跨目录粘贴从源文档位置读取图片，导入目标 `assets/` 后写入新的相对引用。目标目录有同名文件时保留原文件，读取失败时保留可排查的原位置并提示。

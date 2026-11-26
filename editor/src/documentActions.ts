@@ -108,14 +108,33 @@ export async function refreshTree(): Promise<void> {
   }
 }
 
+// 文件树暂时被大纲或搜索结果替换时，读取仍然有效。返回文件树后复用进行中的请求。
+const pendingFolderReads = new Set<string>();
+
 /** 按需加载：读取一个文件夹的子项并合并进目录树。失败时原因显示在状态栏，该文件夹保持未读取。 */
 export async function loadFolder(path: string): Promise<void> {
-  const store = useAppStore.getState();
+  const { workspace } = useAppStore.getState();
+  if (!workspace) {
+    return;
+  }
+  const showAll = showAllFiles();
+  const request = JSON.stringify([workspace, path, showAll]);
+  if (pendingFolderReads.has(request)) {
+    return;
+  }
+  pendingFolderReads.add(request);
+  const isCurrent = () => useAppStore.getState().workspace === workspace && showAllFiles() === showAll;
   try {
-    const node = await listDir(path, showAllFiles());
-    store.mergeTreeNode(node);
+    const node = await listDir(path, showAll);
+    if (isCurrent()) {
+      useAppStore.getState().mergeTreeNode(node);
+    }
   } catch (error) {
-    store.setStatus(errorText(error));
+    if (isCurrent()) {
+      useAppStore.getState().setStatus(errorText(error));
+    }
+  } finally {
+    pendingFolderReads.delete(request);
   }
 }
 

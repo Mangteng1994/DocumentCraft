@@ -6,6 +6,7 @@ import { Decoration, DecorationSet, type EditorView } from "@tiptap/pm/view";
 import { create } from "zustand";
 import { useAppStore } from "../store";
 import { getEditor } from "./editorHandle";
+import { stopRestoringDocumentViewport } from "./documentViewport";
 
 // 所有命中都可定位；同时创建的装饰有窗口上限，避免短关键词使长文档产生过多 DOM。
 const MAX_HIGHLIGHTS = 2000;
@@ -178,6 +179,7 @@ export const documentSearchExtension = Extension.create({
 });
 
 function revealCurrent(editor: Editor): void {
+  stopRestoringDocumentViewport();
   const element = editor.view.dom.querySelector<HTMLElement>("[data-document-search-current]");
   for (let parent = element?.parentElement; parent; parent = parent.parentElement) {
     if (parent instanceof HTMLDetailsElement) {
