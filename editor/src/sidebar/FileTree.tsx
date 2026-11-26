@@ -37,7 +37,7 @@ import { PopupMenu } from "../components/PopupMenu";
 import type { MenuEntry } from "../editor/EditorContextMenu";
 import { SORT_KEYS, type FileColorRule, type SortKey } from "../settings/schema";
 import { useSettings } from "../settings/settingsStore";
-import { useAppStore } from "../store";
+import { EMPTY_FILE_TREE_EXPANSION, useAppStore, type FileTreeExpansionUpdate } from "../store";
 import { iconSize, iconStroke } from "../styles/tokens";
 import { sortNodes } from "./sortTree";
 import { TreeContextMenu, type TreeMenuState } from "./TreeContextMenu";
@@ -420,8 +420,13 @@ const TreeRow = memo(function TreeRow(props: RowProps) {
 
 export function FileTree() {
   const tree = useAppStore((state) => state.tree);
+  const workspace = useAppStore((state) => state.workspace);
   const filePath = useAppStore((state) => state.filePath);
-  const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
+  const expanded = useAppStore((state) => state.fileTreeExpanded.get(state.workspace ?? "") ?? EMPTY_FILE_TREE_EXPANSION);
+  const updateExpanded = useAppStore((state) => state.setFileTreeExpanded);
+  const setExpanded = useCallback((update: FileTreeExpansionUpdate) => {
+    updateExpanded(workspace, update);
+  }, [updateExpanded, workspace]);
   const [locating, setLocating] = useState(false);
   const [revealTarget, setRevealTarget] = useState<{ path: string; root: string } | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -442,8 +447,6 @@ export function FileTree() {
   // 树内拖动的状态，以及从外部拖入文件时指针下的目标文件夹。
   const [drag, setDrag] = useState<DragState | null>(null);
   const [externalTarget, setExternalTarget] = useState<string | null>(null);
-  // 正在读取的文件夹，避免同一个文件夹被重复请求。
-  const loading = useRef<Set<string>>(new Set());
   // 拖动和外部拖入的监听函数是长期存在的，用 ref 读到最新的目录树。
   const treeRef = useRef(tree);
   treeRef.current = tree;
@@ -497,9 +500,11 @@ export function FileTree() {
         return;
       }
       const rootPath = root.path;
+      const rootWorkspace = useAppStore.getState().workspace;
       const current = () => {
-        const latestRoot = useAppStore.getState().tree;
-        return active() && latestRoot !== null && samePath(latestRoot.path, rootPath);
+        const latest = useAppStore.getState();
+        return active() && latest.workspace === rootWorkspace && latest.tree !== null
+          && samePath(latest.tree.path, rootPath);
       };
       const ancestors: string[] = [];
       let directory: TreeNode = root;
@@ -524,7 +529,7 @@ export function FileTree() {
           return;
         }
         if (!child.is_dir) {
-          setExpanded((previous) => new Set([...previous, ...ancestors]));
+          store.setFileTreeExpanded(rootWorkspace, (previous) => new Set([...previous, ...ancestors]));
           setSelectedDir(directory.path);
           setRevealTarget({ path: child.path, root: rootPath });
           return;
@@ -549,11 +554,7 @@ export function FileTree() {
       return;
     }
     for (const path of collectUnloadedExpanded(tree, expanded, [])) {
-      if (loading.current.has(path)) {
-        continue;
-      }
-      loading.current.add(path);
-      void loadFolder(path).finally(() => loading.current.delete(path));
+      void loadFolder(path);
     }
   }, [tree, expanded]);
 
@@ -567,7 +568,7 @@ export function FileTree() {
       }
       return next;
     });
-  }, []);
+  }, [setExpanded]);
 
   const openMenu = useCallback((x: number, y: number, node: TreeNode | null) => {
     setMenu({ x, y, node });
@@ -581,7 +582,7 @@ export function FileTree() {
       return;
     }
     setExpanded((previous) => new Set(previous).add(path));
-  }, []);
+  }, [setExpanded]);
 
   /** 文件夹改名或移动后，里面已展开的文件夹和选中的目标文件夹也要跟着换成新路径。 */
   const remapFolderState = useCallback((from: string, to: string) => {
@@ -593,7 +594,7 @@ export function FileTree() {
       return next;
     });
     setSelectedDir((previous) => (previous ? remapPath(previous, from, to) : previous));
-  }, []);
+  }, [setExpanded]);
 
   const startRename = useCallback((node: TreeNode) => {
     setMenu(null);
@@ -765,11 +766,11 @@ export function FileTree() {
 
   const targetDir = selectedDir ?? tree?.path ?? "";
 
-  const collapseAll = () => setExpanded(new Set());
+  const collapseAll = () => setExpanded(() => new Set());
 
   const expandAll = () => {
     if (tree) {
-      setExpanded(collectLoadedDirectories(tree, new Set()));
+      setExpanded(() => collectLoadedDirectories(tree, new Set()));
     }
   };
 

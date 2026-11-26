@@ -12,6 +12,12 @@ import { parseMarkdown, serializeMarkdown } from "@vmark/utils/markdownPipeline"
 import type { HeadingItem } from "@vmark/utils/markdownOutline";
 import { detectLinebreaks, type LineEnding } from "@vmark/utils/linebreakDetection";
 import type { MarkdownPipelineOptions } from "@vmark/utils/markdownPipeline/types";
+import {
+  captureDocumentViewport,
+  restoreDocumentViewport,
+  stopRestoringDocumentViewport,
+  type DocumentViewport,
+} from "./documentViewport";
 import { syncWordCounts } from "./wordCount";
 
 // 保留原文中的连续空行，避免仅打开再保存就产生大面积差异。
@@ -26,6 +32,9 @@ let documentOptions: MarkdownPipelineOptions = PIPELINE_OPTIONS;
 let cleanMarkdown = "";
 
 export function setEditor(editor: Editor | null): void {
+  if (current !== editor) {
+    stopRestoringDocumentViewport();
+  }
   current = editor;
 }
 
@@ -39,6 +48,7 @@ export function loadMarkdown(markdown: string): void {
   if (!editor) {
     return;
   }
+  stopRestoringDocumentViewport();
   const detected = detectLinebreaks(markdown);
   documentLineEnding = detected.lineEnding;
   documentOptions = { ...PIPELINE_OPTIONS };
@@ -67,11 +77,7 @@ export interface DocumentSnapshot {
   lineEnding: LineEnding;
   options: MarkdownPipelineOptions;
   clean: string;
-  scrollTop: number;
-}
-
-function scrollContainer(): HTMLElement | null {
-  return current?.view.dom.closest<HTMLElement>(".dc-editor-scroll") ?? null;
+  viewport: DocumentViewport;
 }
 
 /** 保存当前编辑现场，切换页签前调用。 */
@@ -85,7 +91,7 @@ export function snapshotDocument(): DocumentSnapshot | null {
     lineEnding: documentLineEnding,
     options: documentOptions,
     clean: cleanMarkdown,
-    scrollTop: scrollContainer()?.scrollTop ?? 0,
+    viewport: captureDocumentViewport(editor.view),
   };
 }
 
@@ -95,15 +101,13 @@ export function restoreDocument(snapshot: DocumentSnapshot): void {
   if (!editor) {
     return;
   }
+  stopRestoringDocumentViewport();
   documentLineEnding = snapshot.lineEnding;
   documentOptions = snapshot.options;
   cleanMarkdown = snapshot.clean;
   editor.view.updateState(snapshot.state);
   syncWordCounts(editor);
-  const container = scrollContainer();
-  if (container) {
-    container.scrollTop = snapshot.scrollTop;
-  }
+  restoreDocumentViewport(editor.view, snapshot.viewport);
 }
 
 /** 把当前内容记为未修改的基线。载入文档和保存成功后调用。 */
@@ -153,6 +157,7 @@ export function revealPosition(position: number, end?: number): void {
   if (!editor) {
     return;
   }
+  stopRestoringDocumentViewport();
   const { doc } = editor.state;
   const anchor = Math.min(Math.max(position, 0), doc.content.size);
   const head = end === undefined ? anchor : Math.min(end, doc.content.size);
