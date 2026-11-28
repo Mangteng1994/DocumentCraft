@@ -4,7 +4,9 @@
 //! 搜索结果据此计算「第几页」。Office 文件（docx、xlsx、pptx）是 zip 包，只读取其中的 XML；
 //! 旧版 doc、xls、ppt 是二进制格式，不解析。提取失败（加密、损坏）返回错误，扫描件没有文字层时返回空文本。
 
+use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
+use std::collections::HashMap;
 use std::fs;
 use std::io::{Read, Seek};
 use std::path::Path;
@@ -42,8 +44,14 @@ pub fn is_markdown_file(path: &Path) -> bool {
 
 /// 单个文档提取出的文本上限（字节）。超出部分截断，避免极端文件占满内存。
 pub const MAX_TEXT_BYTES: usize = 8 * 1024 * 1024;
-/// 参与解析的文件大小上限。更大的文件只按文件名搜索。
-pub const MAX_DOCUMENT_BYTES: u64 = 200 * 1024 * 1024;
+/// Word、Excel 和 PDF 的文件大小上限。PPTX 以 ZIP 随机读取幻灯片 XML，无需解压媒体。
+const MAX_DOCUMENT_BYTES: u64 = 200 * 1024 * 1024;
+
+/// 判断文档大小是否允许进入正文提取和索引。
+pub fn document_size_supported(kind: DocKind, size: u64) -> bool {
+    kind == DocKind::Pptx || size <= MAX_DOCUMENT_BYTES
+}
+
 /// 换页符：分隔 PDF 的页和 PowerPoint 的幻灯片。
 pub const PAGE_BREAK: char = '\u{c}';
 
@@ -147,21 +155,24 @@ fn scan_xml<'a>(xml: &'a str, mut handle: impl FnMut(Token<'a>)) {
     }
 }
 
-/// 取属性值，如 `attr(" r=\"A1\" t=\"s\"", "t")` 得到 `s`。
-fn attr<'a>(attrs: &'a str, name: &str) -> Option<&'a str> {
-    let key = format!("{name}=\"");
-    let mut search_from = 0;
-    while let Some(found) = attrs[search_from..].find(&key) {
-        let start = search_from + found;
-        let preceded_by_space = start == 0 || attrs[..start].ends_with(char::is_whitespace);
-        if preceded_by_space {
-            let value_start = start + key.len();
-            let value_end = attrs[value_start..].find('"')? + value_start;
-            return Some(&attrs[value_start..value_end]);
+/// 逐个读取 XML 属性，保留属性名的前缀，支持两种引号。
+fn xml_attributes(mut attrs: &str) -> impl Iterator<Item = (&str, &str)> {
+    std::iter::from_fn(move || {
+        let (name, after_equals) = attrs.trim_start().split_once('=')?;
+        let value = after_equals.trim_start();
+        let quote = value.chars().next()?;
+        if quote != '"' && quote != '\'' {
+            return None;
         }
-        search_from = start + key.len();
-    }
-    None
+        let (value, rest) = value[quote.len_utf8()..].split_once(quote)?;
+        attrs = rest;
+        Some((name.trim_end(), value))
+    })
+}
+
+/// 读取一个 XML 属性的原值。
+fn attr<'a>(attrs: &'a str, name: &str) -> Option<&'a str> {
+    xml_attributes(attrs).find_map(|(key, value)| (key == name).then_some(value))
 }
 
 /// 还原 XML 实体：五个预定义实体和数字字符引用。
@@ -271,17 +282,179 @@ fn extract_docx<R: Read + Seek>(archive: &mut ZipArchive<R>) -> Result<String, S
     Ok(output)
 }
 
-fn extract_pptx<R: Read + Seek>(archive: &mut ZipArchive<R>) -> Result<String, String> {
-    let slides = numbered_parts(archive, "ppt/slides/slide");
-    if slides.is_empty() {
-        return Err("不是有效的 PowerPoint 文档。".to_string());
-    }
-    let mut output = String::new();
-    for slide in slides {
-        if let Some(xml) = read_entry(archive, &slide) {
-            office_paragraphs(&xml, &mut output);
+/// 搜索命中所在幻灯片的来源信息。页码由主文稿中的顺序决定。
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct PptxSlide {
+    pub id: u32,
+    pub title: Option<String>,
+}
+
+const RELATIONSHIP_NAMESPACES: [&str; 2] = [
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
+    "http://purl.oclc.org/ooxml/officeDocument/relationships",
+];
+
+/// 从主文稿的幻灯片列表读取 ID 和关联 ID，包内 slideN.xml 的编号可能与当前页序不同。
+fn pptx_slide_order(presentation: &str) -> Result<Vec<(u32, String)>, String> {
+    let mut presentation_attrs = "";
+    let mut list_attrs = None;
+    let mut invalid_slide = false;
+    let mut slides = Vec::new();
+    scan_xml(presentation, |token| match token {
+        Token::Start { name: "presentation", attrs, .. } => presentation_attrs = attrs,
+        Token::Start { name: "sldIdLst", attrs, empty: false } => list_attrs = Some(attrs),
+        Token::End("sldIdLst") => list_attrs = None,
+        Token::Start { name: "sldId", attrs, .. } => {
+            let Some(list_attrs) = list_attrs else {
+                return;
+            };
+            let id = attr(attrs, "id").and_then(|value| value.parse::<u32>().ok());
+            let relation = xml_attributes(attrs).find_map(|(key, value)| {
+                let (prefix, local) = key.split_once(':')?;
+                if local != "id" {
+                    return None;
+                }
+                let declaration = format!("xmlns:{prefix}");
+                let namespace = [attrs, list_attrs, presentation_attrs]
+                    .into_iter()
+                    .find_map(|scope| attr(scope, &declaration))?;
+                if RELATIONSHIP_NAMESPACES.contains(&namespace) {
+                    return Some(unescape(value).into_owned());
+                }
+                None
+            });
+            match (id, relation) {
+                (Some(id), Some(relation)) => slides.push((id, relation)),
+                _ => invalid_slide = true,
+            }
         }
-        output.push(PAGE_BREAK);
+        _ => {}
+    });
+    if invalid_slide {
+        return Err("PowerPoint 幻灯片列表缺少有效的页面标识。".to_string());
+    }
+    Ok(slides)
+}
+
+/// 将主文稿相对路径转换为 ZIP 部件名。外部关系由调用方跳过。
+fn pptx_slide_part(target: &str) -> Option<String> {
+    let mut components = Vec::new();
+    let path = if let Some(absolute) = target.strip_prefix('/') {
+        absolute
+    } else {
+        components.push("ppt");
+        target
+    };
+    for component in path.split('/') {
+        match component {
+            "" | "." => {}
+            ".." => {
+                components.pop()?;
+            }
+            name => components.push(name),
+        }
+    }
+    Some(components.join("/"))
+}
+
+/// 将内部幻灯片关联 ID 映射到对应的 ZIP 部件。
+fn pptx_slide_relationships(relationships: &str) -> HashMap<String, String> {
+    let mut parts = HashMap::new();
+    scan_xml(relationships, |token| {
+        let Token::Start { name: "Relationship", attrs, .. } = token else {
+            return;
+        };
+        let Some(kind) = attr(attrs, "Type") else {
+            return;
+        };
+        let Some(namespace) = kind.strip_suffix("/slide") else {
+            return;
+        };
+        if !RELATIONSHIP_NAMESPACES.contains(&namespace)
+            || attr(attrs, "TargetMode") == Some("External")
+        {
+            return;
+        }
+        if let (Some(id), Some(target)) = (attr(attrs, "Id"), attr(attrs, "Target")) {
+            if let Some(part) = pptx_slide_part(&unescape(target)) {
+                parts.insert(unescape(id).into_owned(), part);
+            }
+        }
+    });
+    parts
+}
+
+/// 优先返回标题占位符中的内容。没有标题占位符时可使用幻灯片本身的显式名称。
+fn pptx_slide_title(xml: &str) -> Option<String> {
+    let mut in_shape = false;
+    let mut title_shape = false;
+    let mut in_text = false;
+    let mut shape_title = String::new();
+    let mut title = None;
+    let mut slide_name = None;
+    scan_xml(xml, |token| {
+        if title.is_some() {
+            return;
+        }
+        match token {
+            Token::Start { name: "cSld", attrs, .. } if slide_name.is_none() => {
+                slide_name = attr(attrs, "name").map(|name| unescape(name).trim().to_string());
+            }
+            Token::Start { name: "sp", empty: false, .. } => {
+                in_shape = true;
+                title_shape = false;
+                shape_title.clear();
+            }
+            Token::Start { name: "ph", attrs, .. } if in_shape => {
+                title_shape = matches!(attr(attrs, "type"), Some("title" | "ctrTitle"));
+            }
+            Token::Start { name: "t", empty: false, .. } if title_shape => in_text = true,
+            Token::End("t") => in_text = false,
+            Token::Text(text) if in_text => shape_title.push_str(&unescape(text)),
+            Token::End("p") | Token::Start { name: "br", .. } if title_shape => shape_title.push(' '),
+            Token::End("sp") => {
+                if title_shape {
+                    let value = shape_title.split_whitespace().collect::<Vec<_>>().join(" ");
+                    if !value.is_empty() {
+                        title = Some(value);
+                    }
+                }
+                in_shape = false;
+                title_shape = false;
+                in_text = false;
+            }
+            _ => {}
+        }
+    });
+    title.or_else(|| slide_name.filter(|name| !name.is_empty()))
+}
+
+/// 读取幻灯片正文及页序信息。按部件顺序读取 XML，原始图片和视频始终留在 ZIP 中。
+fn extract_pptx<R: Read + Seek>(archive: &mut ZipArchive<R>) -> Result<ExtractedText, String> {
+    let presentation = read_entry(archive, "ppt/presentation.xml")
+        .ok_or_else(|| "缺少 PowerPoint 主文稿。".to_string())?;
+    let slide_order = pptx_slide_order(&presentation)?;
+    if slide_order.is_empty() {
+        return Ok(ExtractedText::default());
+    }
+    let relationships = read_entry(archive, "ppt/_rels/presentation.xml.rels")
+        .ok_or_else(|| "缺少 PowerPoint 主文稿的关联表。".to_string())?;
+    let parts = pptx_slide_relationships(&relationships);
+    let mut output = ExtractedText::default();
+    for (id, relation) in slide_order {
+        let part = parts
+            .get(&relation)
+            .ok_or_else(|| format!("找不到幻灯片 {id} 的关联。"))?;
+        let xml = read_entry(archive, part)
+            .ok_or_else(|| format!("无法读取幻灯片 {id}。"))?;
+        let title = pptx_slide_title(&xml);
+        output.slides.push(PptxSlide { id, title });
+        office_paragraphs(&xml, &mut output.text);
+        output.text.push(PAGE_BREAK);
+        if output.text.len() >= MAX_TEXT_BYTES {
+            output.text = truncate_on_boundary(output.text, MAX_TEXT_BYTES);
+            break;
+        }
     }
     Ok(output)
 }
@@ -380,15 +553,24 @@ fn extract_xlsx<R: Read + Seek>(archive: &mut ZipArchive<R>) -> Result<String, S
     Ok(output)
 }
 
-fn extract_office(path: &Path, kind: DocKind) -> Result<String, String> {
+/// 供正文索引使用的文本与可选的幻灯片来源信息。
+#[derive(Default)]
+pub struct ExtractedText {
+    pub text: String,
+    pub slides: Vec<PptxSlide>,
+}
+
+/// 读取 Office 包。PPTX 同时返回搜索命中所需的页序映射。
+fn extract_office(path: &Path, kind: DocKind) -> Result<ExtractedText, String> {
     let file = fs::File::open(path).map_err(|error| format!("无法读取：{error}"))?;
     let mut archive = ZipArchive::new(file).map_err(|_| "不是有效的 Office 文档，或文档已加密。".to_string())?;
-    match kind {
-        DocKind::Docx => extract_docx(&mut archive),
-        DocKind::Xlsx => extract_xlsx(&mut archive),
-        DocKind::Pptx => extract_pptx(&mut archive),
-        DocKind::Pdf | DocKind::Text => Err("内部错误：该类型不走 Office 路径。".to_string()),
-    }
+    let text = match kind {
+        DocKind::Docx => extract_docx(&mut archive)?,
+        DocKind::Xlsx => extract_xlsx(&mut archive)?,
+        DocKind::Pptx => return extract_pptx(&mut archive),
+        DocKind::Pdf | DocKind::Text => return Err("内部错误：该类型不走 Office 路径。".to_string()),
+    };
+    Ok(ExtractedText { text, slides: Vec::new() })
 }
 
 fn is_han(character: char) -> bool {
@@ -486,22 +668,34 @@ fn extract_plain_text(path: &Path) -> Result<String, String> {
     decode_text_bytes(&bytes).ok_or_else(|| "无法识别的文本编码，或不是文本文件。".to_string())
 }
 
-/// 提取文档正文。文件过大、类型不支持或解析失败时返回错误；扫描件没有文字层时返回空文本。
-pub fn extract_text(path: &Path) -> Result<String, String> {
-    if doc_kind(path).is_none() && is_text_file(path) {
-        return extract_plain_text(path);
-    }
-    let kind = doc_kind(path).ok_or_else(|| "不支持的文档类型。".to_string())?;
-    let size = fs::metadata(path).map_err(|error| format!("无法读取：{error}"))?.len();
-    if size > MAX_DOCUMENT_BYTES {
-        return Err("文件过大，已跳过正文。".to_string());
-    }
-    let text = match kind {
-        DocKind::Pdf => extract_pdf(path)?,
-        DocKind::Text => extract_plain_text(path)?,
-        other => extract_office(path, other)?,
+/// 提取用于搜索的正文和来源信息。扫描件没有文字层时返回空文本。
+pub fn extract_index_text(path: &Path) -> Result<ExtractedText, String> {
+    let kind = match doc_kind(path) {
+        Some(kind) => kind,
+        None if is_text_file(path) => DocKind::Text,
+        None => return Err("不支持的文档类型。".to_string()),
     };
-    Ok(truncate_on_boundary(text, MAX_TEXT_BYTES))
+    let mut output = match kind {
+        DocKind::Text => ExtractedText { text: extract_plain_text(path)?, slides: Vec::new() },
+        other => {
+            let size = fs::metadata(path).map_err(|error| format!("无法读取：{error}"))?.len();
+            if !document_size_supported(other, size) {
+                return Err("文件过大，已跳过正文。".to_string());
+            }
+            if other == DocKind::Pdf {
+                ExtractedText { text: extract_pdf(path)?, slides: Vec::new() }
+            } else {
+                extract_office(path, other)?
+            }
+        }
+    };
+    output.text = truncate_on_boundary(output.text, MAX_TEXT_BYTES);
+    Ok(output)
+}
+
+/// 提取文档纯文本，供搜索预览等不需要幻灯片来源信息的调用方使用。
+pub fn extract_text(path: &Path) -> Result<String, String> {
+    extract_index_text(path).map(|output| output.text)
 }
 
 #[cfg(test)]
@@ -556,15 +750,32 @@ mod tests {
     }
 
     #[test]
-    fn pptx_slides_are_ordered_numerically_and_separated_by_page_breaks() {
-        let slide = |text: &str| format!(r#"<p:sld xmlns:a="x" xmlns:p="y"><a:p><a:r><a:t>{text}</a:t></a:r></a:p></p:sld>"#);
-        let (one, two, ten) = (slide("第一张"), slide("第二张"), slide("第十张"));
+    fn pptx_slides_follow_presentation_order_and_keep_title_and_id() {
+        let presentation = r#"<p:presentation xmlns:rel="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="y">
+            <p:sldIdLst><p:sldId id="262" rel:id="rId2"/><p:sldId id="256" rel:id="rId1"/></p:sldIdLst>
+        </p:presentation>"#;
+        let relationships = r#"<Relationships>
+            <Relationship Id='rId1' Type='http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide' Target='slides/slide1.xml'/>
+            <Relationship Id='rId2' Type='http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide' Target='/ppt/slides/slide2.xml'/>
+        </Relationships>"#;
+        let slide = |text: &str| format!(r#"<p:sld xmlns:a="x" xmlns:p="y">
+            <p:sp><p:nvSpPr><p:nvPr><p:ph type="title"/></p:nvPr></p:nvSpPr>
+            <p:txBody><a:p><a:r><a:t>{text}</a:t></a:r></a:p></p:txBody></p:sp>
+        </p:sld>"#);
+        let (one, two) = (slide("旧页序第一张"), slide("旧页序第二张"));
         let path = write_package(
             "a.pptx",
-            &[("ppt/slides/slide10.xml", ten.as_str()), ("ppt/slides/slide2.xml", two.as_str()), ("ppt/slides/slide1.xml", one.as_str())],
+            &[
+                ("ppt/presentation.xml", presentation),
+                ("ppt/_rels/presentation.xml.rels", relationships),
+                ("ppt/slides/slide1.xml", one.as_str()),
+                ("ppt/slides/slide2.xml", two.as_str()),
+            ],
         );
-        let text = extract_text(&path).unwrap();
-        assert_eq!(text, "第一张\n\u{c}第二张\n\u{c}第十张\n\u{c}");
+        let output = extract_index_text(&path).unwrap();
+        assert_eq!(output.text, "旧页序第二张\n\u{c}旧页序第一张\n\u{c}");
+        assert_eq!(output.slides[0].id, 262);
+        assert_eq!(output.slides[0].title.as_deref(), Some("旧页序第二张"));
         assert_eq!(DocKind::Pptx.locator(1, 1), "第 2 张");
         let _ = fs::remove_file(&path);
     }

@@ -4,7 +4,7 @@
  */
 
 import { create } from "zustand";
-import type { IndexProgress, TreeNode } from "./backend";
+import type { IndexProgress, SearchSlide, TreeNode } from "./backend";
 import type { Note, NoteAnchor } from "./editor/annotations";
 import type { HeadingItem } from "@vmark/utils/markdownOutline";
 import type { SearchMode } from "./settings/schema";
@@ -33,15 +33,18 @@ export interface SearchPreviewTarget {
   mode: SearchMode;
   /** 点击的是哪一处匹配（位置说明，如「第 3 页」），预览页据此滚动到对应命中；点击文件行时为空。 */
   focusLocator: string;
+  /** PPTX 正文命中可直接打开该页的原生素材选择。 */
+  slide?: SearchSlide;
 }
 
-/** 浮层：设置、插入表格、Quick Ask、文件属性、媒体压缩。同一时刻只显示一个。 */
+/** 同一时刻只显示一个浮层。 */
 export type Overlay =
   | { kind: "settings"; tab: SettingsTab }
   | { kind: "properties"; path: string }
   | { kind: "insertTable" }
   | { kind: "quickAsk"; commandName?: string }
   | { kind: "compress" }
+  | { kind: "deck" }
   | null;
 
 export interface ContextMenuState {

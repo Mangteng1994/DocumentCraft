@@ -81,6 +81,7 @@
 | DC-084 | Markdown 转 Word 表格所有框线 | 样式模板与完整模板模式导出的 Markdown 表格均显示全部外框及内部横竖线，采用黑色 0.5 磅单实线；覆盖生成表格及单元格的无边框设置，完整模板原有表格保持原样 | 已实现并打包 0.4.5，未测试（用户未要求） · Must；`core/src/documentcraft/templates.py` 的 `apply_generated_table_borders`，在 `apply_template_styles` 中对生成内容统一处理；表格级和单元格级显式边框覆盖无框线，保存分支同步生效 |
 | DC-085 | 图片重命名并保持工作区引用 | 点击图片后的路径浮窗提供重命名，保留图片扩展名，重名与非法名称拒绝；实际修改 assets 内图片文件名，并同步整个工作区 Markdown 中的行内与引用式图片地址，以及已打开页签中的引用；保留其他未保存修改；涉及回写的文件发生外部变更时中止；写入失败时恢复并报告恢复异常；界面设计值统一引用设计令牌 | 已实现并打包 0.4.5，未测试（用户未要求） · Must；`editor/src/editor/ImagePathPopover.tsx`、`imageReferences.ts`、`documentActions.ts`、`src-tauri/src/image_rename.rs`；支持行内图片、引用定义及链接的局部改写，保留其他原文；更新页签现场并保留未保存修改，撤销/重做时纠正旧地址；同名拒绝覆盖，独占句柄核对原文，失败时恢复并列出恢复异常 |
 | DC-086 | 当前 Markdown 文档内搜索与定位 | 焦点在编辑区时 Ctrl+F 打开文档顶部搜索栏，按正文纯文本不区分大小写搜索；覆盖标题、段落、列表、表格、代码块及跨格式边界的文字；显示当前/总命中数，高亮并定位命中，Enter/F3 下一处、Shift+Enter/Shift+F3 上一处，首尾循环，Esc 或关闭按钮收起并返回编辑；定位被收拢章节时展开；切换页签后按当前文档更新，搜索不改内容或未保存状态；焦点在侧栏等区域时保留工作区搜索 | 已实现并打包 0.4.5，未测试（用户未要求） · Must；`editor/src/editor/documentSearch.ts`、`DocumentSearchBar.tsx`、`MarkdownEditor.tsx`、`extensions.ts`、`editor/src/settings/useHotkeys.ts`、`schema.ts`、`styles/tokens.css`、`app.css`；按编辑器文本位置搜索，跨加粗等格式匹配，选区定位触发章节展开；使用装饰而非修改正文，全部命中均可定位，同时高亮当前附近最多 2000 处以控制长文档 DOM 数量 |
+| DC-019 | 按页组汇报（Markdown 与历史 PPT 素材 → PPTX） | 搜索历史 PPTX，结果显示文件名、第 N 页、页标题及命中片段；按需预览当前页并点选素材，可将多份旧稿的图片、文字、表格或标明为图片的区域快照与新写的内容放入同一张单位模板页；也可整页沿用，或以旧页为底替换单个素材并沿用其位置；可调整页序，显示引用待确认与导出进度。引用保存来源文件、幻灯片 ID、形状 ID（适用时）和内容指纹，旧稿变动后复核，歧义交由用户确认。生成独立 PPTX，保护已有定稿；WPS 打开无需修复，新页文字与表格可编辑，备注进入演讲者备注区，旧页的背景、母版和复杂对象按所选复用方式验收 | Must · 单页导出已用真实单位模板在 WPS 实机验收；多页与整页复用开发中，详见下方 DC-019 交接记录 |
 
 ## Should
 
@@ -110,7 +111,29 @@
 | DC-038 | 编辑器安装包 | Tauri 打包含 `docflow` sidecar 的 Windows 安装包 | 已实现 · 部分验收。`scripts/build-sidecar.ps1` → `out/sidecar/`，`npm run bundle`（`scripts/bundle-editor.ps1`，MSVC 工具链）生成 `DocumentCraft_0.2.8_x64-setup.exe`；见 2026-11-12 打包验收记录 |
 | DC-008 | 旧版 DOC 与 WPS COM | 可通过 WPS 对 DOC 模板和输出进行兼容转换 | 后续文档引擎切片 |
 | DC-009 | 本地工作台与模板管理 | Vue 3 / Tauri 2 经 FastAPI 调用核心，SQLite 保存任务和模板元数据 | 后续产品切片 |
-| DC-019 | HTML 转 PPT | 可在导航中独立接入 HTML 转 PPT 工作流 | 后续切片 |
+
+## DC-019 范围与界面交接
+
+- 0730 第 2 页目录回归：同页选取的编号、文字等对象应保留相对位置和比例，跨页素材另行分区；导出页清理未使用的正文与标题占位符。已实现并打包至独立测试版 0.4.5-deck.3。已核对用户导出文件中的散排及残留占位符，修复后未在 WPS 实测。
+
+- Must 的验收场景：从旧稿 A 选一张保留裁剪的装置图，从旧稿 B 取一张表，加上 Markdown 新结论，按单位模板导出。WPS 中可以改表格和结论。另用旧页验证替换一张图并保留其余排版，整页沿用则核对背景、母版、备注和动画。
+- 旧文字复用属于 Must。当前页可点选原文本框，取内容到 Markdown 时保留文字和段落，带格式加入时保留为可在 WPS 编辑的原生文本对象。新页可混排两种文字和既有素材。入口位于 `DeckSourcePreview.tsx`，文本选择及追加由 `useDeckSourcePicker.ts`、`deckDraft.ts` 处理。`deck_preview.py` 提取文字并定位源版式占位符，`deck_parts.py` 将原生文字对象带到新页，保留显式文字格式并解析可继承的源样式。代码已接入，待实机试用。
+- Should：历史库缩略图浏览、预览缓存与导出时可选 DC-073 媒体压缩。当前选中页的预览与素材点选属于 Must。
+- Could：保存手调坐标、保留手调结果的增量生成、溢出检查和少量画布操作。首版在 WPS 精修交付稿。
+- 兼容性验证：用真实大稿中的视频页、图表或 SmartArt 页及多组合形状页比较直接插页与单页缓存。分别记录首次选页、首次导出和再次导出的耗时、峰值内存、缓存占用和最终文件大小，在最终 PPTX 核对文字和图表编辑、动画和视频播放以及版式。另验证对象复制；采用快照时向用户标明以图片插入。用真实单位模板确认适用版式和占位符。
+- 界面入口：左侧功能区「组汇报」打开当前新页草稿；工作区 SearchView 的 PPTX 正文命中直接打开旧页预览，显示文件名、页码、页标题和命中片段。可预览、点选素材、加入当前新页、查看来源页及移除素材。草稿窗口新增单位 PPTX 模板选择与「导出 PPTX」入口，显示核对来源、套模板、逐项复制、保存与检查的进度。
+- UI 交接：`editor/src/features/deck/DeckSourcePreview.tsx` 承载旧页预览，`DeckSlideView.tsx` 渲染选区和可键盘操作的素材清单，`DeckDraftDialog.tsx` 复用 Dialog 和 PopupMenu。局部样式在 `deck.css`，设计值复用现有令牌。搜索入口沿用 `editor/src/sidebar/SearchView.tsx`，`editor/src/App.tsx` 连接功能区和预览入口。展示通过 props 或 hooks 取数据，新增设计值仍统一在 `tokens.css` 与 `tokens.ts` 定义。
+- 逐页搜索基础：`editor/src-tauri/src/extract.rs` 按主文稿页序读取幻灯片 XML，提取页 ID、标题和正文。`textindex.rs` 使旧 PPTX 缓存按新格式重建，并允许超过 200 MB 的 PPTX 参与索引。`workspace.rs` 与 `editor/src/backend.ts` 为搜索结果提供结构化的页码、ID 和标题。
+- 选材逻辑：`docflow deck-preview` 调用 `core/src/documentcraft/deck_preview.py` 按源页 ID 读取对象与指纹，再只读调用 WPS 或 PowerPoint 的单页 PNG 导出。没有原页图像时仍可选取清单对象。首次渲染可能需要演示软件后台打开大稿，时耗和内存待实测。
+- 草稿数据由 `editor/src/features/deck/deckDraft.ts` 按工作区保存，包括选定的模板；`deckSource.ts` 负责预览与演示软件任务排队，`useDeckSourcePicker.ts` 负责选中、去重及引用变动提示。`useDeckExport.ts` 负责文件对话框、sidecar 调用和导出状态，`DeckDraftDialog.tsx` 通过该 hook 展示。
+- 单页导出：`docflow deck-export` → `core/src/documentcraft/deck_export.py`。按源页 ID、形状 ID 和指纹复核引用，用 WPS 或 PowerPoint 在单位模板副本上生成单页。Pandoc 将 Markdown 正文转换为可编辑的文本。兼容缺少占位符的版式，在当前版式内补原生文本框。仅清理副本母版中与新标题冲突的示例标题，宽表格占用整行，按位置缩放表格网格、单元格文字和图表文字。
+- 素材封装：`core/src/documentcraft/deck_parts.py` 按关系流式迁移原生图片、图表、内嵌工作簿、表格及兼容组合，生成独立对象 ID 和包内关系。WPS 生成模板页，无须通过系统剪贴板复制旧表，也无须用 WPS 打开旧素材文件。`deck_chart.py` 仅在数据唯一匹配时把固定数值系列绑定至同值的内嵌工作簿区域。导出核对版式、原生对象和工作簿，保护已有文件。
+- 2026-11-26 实机验收通过。用指定的《高速公路改扩建数智建管关键技术研究-汇报版0730.pptx》（1.55 GB）作单位模板，也从该旧稿第 56 页取图片、第 37 页取 5×8 表格，从《招商积余(001914)投资分析课件.pptx》第 4 页取原生图表，加入两行 Markdown 正文。WPS 演示 12.1.0.29670 打开仅一页，版式为「标题和内容」。在 WPS 中修改内嵌工作簿 B2 和表格左上角，保存并关闭重开，确认图表缓存随工作簿更新、表格保持 5×8 且单元格内容持久化，图片及新页文本均在。对重开页导出 1280×720 PNG，核对标题、图片、图表和整张表格均在页面内。成果在本机 `out/deck-wps-acceptance/`。
+- 实测修复：`deck_preview.py` 处理 WPS 按幻灯片 ID 返回空对象，按当前页码回取并核对 ID；原系统剪贴板流程在本机触发 WPS 表格复制及 OLE 崩溃，已由原生对象封装替代。修复自定义版式缺占位符、示例标题重叠和宽表溢出，以及图表固定序列在修改工作簿后不刷新。针对性回归见 `core/tests/test_deck_office.py`，通过 7 项。实机验收覆盖导出 sidecar 和 WPS 编辑重开；桌面入口点击、多页页序、整页复用和以旧页为底替换待后续验收。
+
+- 2026-11-26 Windows x64 本地试用包：DocumentCraft PPT Test 0.4.5-deck.1，独立安装标识 app.documentcraft.editor.ppttest，使用独立应用设置，关闭正式更新端点与更新签名产物。安装包位于 `out/deck-test-build/DocumentCraft-PPT-Test_0.4.5-deck.1_x64-setup.exe`（130.17 MiB）。生产前端、MSVC Release、PyInstaller 和 NSIS 构建通过。解包确认编辑器、内置 Word 模板及最新 sidecar 均在，sidecar 的 SHA-256 与构建产物一致。仅提供本地安装包，本轮未安装或运行功能测试。
+
+- 旧文字复用已打进 Windows x64 本地试用包 0.4.5-deck.2，沿用 PPT 测试版的独立安装标识。安装包位于 `out/deck-test-build/DocumentCraft-PPT-Test_0.4.5-deck.2_x64-setup.exe`（130.50 MiB）。前端类型检查、生产构建、MSVC Release、PyInstaller 和 NSIS 构建通过。解包确认 sidecar 与当前构建副本的 SHA-256 一致，本轮未运行 WPS 或桌面功能测试。
 
 ## DC-023 Spike 验收
 

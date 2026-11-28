@@ -6,7 +6,7 @@
  */
 
 import { useEffect, type ReactNode } from "react";
-import { Bot, FileText, FolderOpen, MessageSquare, Minimize2, Settings, X } from "lucide-react";
+import { Bot, FileText, FolderOpen, MessageSquare, Minimize2, Presentation, Settings, X } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { ask } from "@tauri-apps/plugin-dialog";
 import { MarkdownEditor } from "./editor/MarkdownEditor";
@@ -22,6 +22,8 @@ import { toggleCopilot } from "./features/copilot/actions";
 import { SettingsModal } from "./features/settings/SettingsModal";
 import { CompressDialog } from "./features/compress/CompressDialog";
 import { useCompress } from "./features/compress/compressStore";
+import { DeckDraftDialog } from "./features/deck/DeckDraftDialog";
+import { DeckSourcePreview } from "./features/deck/DeckSourcePreview";
 import { isFigureActive, useFigureJob } from "./features/figures/figureStore";
 import { SearchPreview } from "./features/preview/SearchPreview";
 import { FileProperties } from "./sidebar/FileProperties";
@@ -33,7 +35,7 @@ import { WorkspaceSwitcher } from "./components/WorkspaceSwitcher";
 import { WordCountStatus } from "./components/WordCountStatus";
 import { UpdateBadge } from "./features/updater/UpdateBadge";
 import { useAutoUpdate } from "./features/updater/useAutoUpdate";
-import { chooseFile, chooseWorkspace } from "./documentActions";
+import { chooseFile, chooseWorkspace, closeSearchPreview, showSearchPreview } from "./documentActions";
 import { fileName } from "./paths";
 import { useSettings } from "./settings/settingsStore";
 import { useEditorAppearance, useTheme } from "./settings/theme";
@@ -83,7 +85,37 @@ function ActiveOverlay({ overlay }: { overlay: Overlay }) {
   if (overlay.kind === "compress") {
     return <CompressDialog />;
   }
+  if (overlay.kind === "deck") {
+    return <DeckOverlay />;
+  }
   return <QuickAsk commandName={overlay.commandName} />;
+}
+
+function DeckOverlay() {
+  const workspace = useAppStore((state) => state.workspace);
+  const close = () => useAppStore.getState().setOverlay(null);
+  return (
+    <DeckDraftDialog
+      key={workspace}
+      workspace={workspace}
+      onClose={close}
+      onShowSource={(asset) => {
+        showSearchPreview({
+          path: asset.path,
+          name: fileName(asset.path),
+          query: "",
+          mode: "text",
+          focusLocator: "",
+          slide: { id: asset.slideId, number: asset.pageNumber, title: asset.pageTitle },
+        });
+        close();
+      }}
+      onSearch={() => {
+        close();
+        useAppStore.getState().openSearch();
+      }}
+    />
+  );
 }
 
 export function App() {
@@ -120,6 +152,21 @@ export function App() {
   useEffect(() => {
     void reloadCommands();
   }, [workspace, copilotFolder, reloadCommands]);
+
+  // PPTX 实物预览沿用搜索预览的 Esc 行为，浮层打开时由浮层处理。
+  const deckPreviewOpen = Boolean(preview?.slide);
+  useEffect(() => {
+    if (!deckPreviewOpen) {
+      return;
+    }
+    const handleKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && useAppStore.getState().overlay === null) {
+        closeSearchPreview();
+      }
+    };
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  }, [deckPreviewOpen]);
 
   // 文档正文索引的进度来自后端事件，整个运行期间监听。
   useEffect(() => listenSearchIndex(), []);
@@ -188,6 +235,12 @@ export function App() {
           onClick={() => setOverlay({ kind: "compress" })}
           pressed={compressPhase === "running" || overlay?.kind === "compress"}
         />
+        <RibbonButton
+          label="组汇报"
+          icon={<Presentation {...ribbonIcon} />}
+          onClick={() => setOverlay({ kind: "deck" })}
+          pressed={overlay?.kind === "deck"}
+        />
         <span className="dc-ribbon-spacer" />
         <RibbonButton
           label={figureRunning ? `设置（${figureLabel}）` : "设置"}
@@ -207,7 +260,17 @@ export function App() {
           </div>
           {!hasDocument && <WelcomeView />}
           {/* 搜索结果预览页盖在文档区上，编辑器保持挂载，关闭后原样恢复。 */}
-          {preview && <SearchPreview />}
+          {preview?.slide ? (
+            <DeckSourcePreview
+              key={JSON.stringify([workspace, preview.path, preview.slide.id])}
+              path={preview.path}
+              fileName={preview.name}
+              slide={preview.slide}
+              workspace={workspace}
+              onClose={closeSearchPreview}
+              onOpenDraft={() => setOverlay({ kind: "deck" })}
+            />
+          ) : preview && <SearchPreview />}
         </main>
         {rightPanel && (
           <aside className="dc-panel" aria-label={rightPanel === "comments" ? "批注" : "Copilot"}>

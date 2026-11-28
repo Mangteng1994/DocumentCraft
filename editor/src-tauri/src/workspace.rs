@@ -408,6 +408,14 @@ impl SearchMode {
     }
 }
 
+/// PPTX 命中页的原始标识和显示信息。UI 可直接传页码和 ID，无需解析 locator。
+#[derive(Serialize)]
+struct SearchSlide {
+    number: usize,
+    id: u32,
+    title: Option<String>,
+}
+
 #[derive(Serialize)]
 pub struct SearchMatch {
     /// 从 1 起的行号。文档类结果为 0，位置见 locator。
@@ -416,6 +424,8 @@ pub struct SearchMatch {
     occurrence: usize,
     /// 位置说明：纯文本是行号，文档是「第 N 页」「第 N 段」等。
     locator: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    slide: Option<SearchSlide>,
     before: String,
     hit: String,
     after: String,
@@ -702,7 +712,20 @@ fn search_document(entry: &DocEntry, needle: &str, budget: usize) -> (Vec<Search
             None => window_end,
         };
         let (before, hit, after) = snippet_parts(&text[line_start..start], &text[start..end], &text[end..line_end]);
-        matches.push(SearchMatch { line: 0, occurrence, locator: entry.kind.locator(newlines, pages), before, hit, after });
+        let slide = entry.slides.get(pages).map(|source| SearchSlide {
+            number: pages + 1,
+            id: source.id,
+            title: source.title.clone(),
+        });
+        matches.push(SearchMatch {
+            line: 0,
+            occurrence,
+            locator: entry.kind.locator(newlines, pages),
+            slide,
+            before,
+            hit,
+            after,
+        });
     }
     (matches, more)
 }
@@ -722,7 +745,15 @@ fn search_plain_text(text: &str, needle: &[char], budget: usize) -> (Vec<SearchM
                 break;
             }
             let (before, hit, after) = snippet(&original, start, needle.len());
-            matches.push(SearchMatch { line: index + 1, occurrence, locator: (index + 1).to_string(), before, hit, after });
+            matches.push(SearchMatch {
+                line: index + 1,
+                occurrence,
+                locator: (index + 1).to_string(),
+                slide: None,
+                before,
+                hit,
+                after,
+            });
             occurrence += 1;
         }
         if more {
@@ -1056,7 +1087,7 @@ mod tests {
         }
         let mut docs: DocIndex = HashMap::new();
         let mut add = |path: &Path, kind: crate::extract::DocKind, text: &str, error: Option<&str>| {
-            let entry = DocEntry { kind, lower: fold_text(text), text: text.to_string(), error: error.map(str::to_string) };
+            let entry = DocEntry { kind, lower: fold_text(text), text: text.to_string(), slides: Vec::new(), error: error.map(str::to_string) };
             docs.insert(path.to_string_lossy().into_owned(), Arc::new(entry));
         };
         // PDF：第 1 页没有关键词，第 2 页有两处；大写英文也要能搜到。
@@ -1263,7 +1294,7 @@ mod tests {
         // 手动建立索引后，Markdown 从索引里查，位置按行；txt 仍然搜不到正文。
         let mut docs: DocIndex = HashMap::new();
         let text = "第一行\n流速 0.5\n";
-        let entry = DocEntry { kind: crate::extract::DocKind::Text, lower: fold_text(text), text: text.to_string(), error: None };
+        let entry = DocEntry { kind: crate::extract::DocKind::Text, lower: fold_text(text), text: text.to_string(), slides: Vec::new(), error: None };
         docs.insert(note.to_string_lossy().into_owned(), Arc::new(entry));
         let indexed_context = SearchContext { docs: &docs, indexing: false, deferred: false, large: true };
         let found = search_files(&walked, "流速", SearchMode::Text, &indexed_context);

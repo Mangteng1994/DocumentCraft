@@ -14,7 +14,10 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-use crate::extract::{doc_kind, extract_text, is_markdown_file, DocKind, LEGACY_NON_UTF8_ERROR, MAX_DOCUMENT_BYTES, MAX_TEXT_FILE_BYTES};
+use crate::extract::{
+    doc_kind, document_size_supported, extract_index_text, is_markdown_file, DocKind, ExtractedText,
+    PptxSlide, LEGACY_NON_UTF8_ERROR, MAX_TEXT_FILE_BYTES,
+};
 
 /// 解析文档时最多同时使用的线程数。
 const MAX_WORKERS: usize = 4;
@@ -25,14 +28,18 @@ pub struct DocEntry {
     pub kind: DocKind,
     pub text: String,
     pub lower: String,
+    /// 按当前页序排列的幻灯片信息，其他文档为空。
+    pub slides: Vec<PptxSlide>,
     /// 解析失败的原因；成功时为 None。
     pub error: Option<String>,
 }
 
 impl DocEntry {
-    fn new(kind: DocKind, text: String, error: Option<String>) -> DocEntry {
+    /// 保留折叠后的检索文本和同一版本的幻灯片信息。
+    fn new(kind: DocKind, extracted: ExtractedText, error: Option<String>) -> DocEntry {
+        let ExtractedText { text, slides } = extracted;
         let lower = fold_text(&text);
-        DocEntry { kind, text, lower, error }
+        DocEntry { kind, text, lower, slides, error }
     }
 }
 
@@ -58,6 +65,9 @@ struct CacheFile {
     size: u64,
     text: String,
     error: Option<String>,
+    // 旧 PPTX 缓存使用包内部件编号排序，缺少 slides 时必须重新建立索引。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    slides: Option<Vec<PptxSlide>>,
 }
 
 /// 工作区扫描得到的一个文件。大小和修改时间取自目录枚举，不需要再逐个访问文件系统，
@@ -80,7 +90,7 @@ pub fn indexable(rec: &FileRec, include_markdown: bool) -> Option<DocKind> {
         return None;
     }
     if let Some(kind) = doc_kind(&rec.path) {
-        return (rec.size <= MAX_DOCUMENT_BYTES).then_some(kind);
+        return document_size_supported(kind, rec.size).then_some(kind);
     }
     if include_markdown && is_markdown_file(&rec.path) && rec.size <= MAX_TEXT_FILE_BYTES {
         return Some(DocKind::Text);
@@ -312,16 +322,35 @@ fn load_entry(
     if let Some(cached) = read_cache(&cache_path) {
         // 旧版本缓存的「不是 UTF-8」错误已经过时（现在能识别 GBK 等编码），不复用，重新解析。
         let outdated_error = cached.error.as_deref() == Some(LEGACY_NON_UTF8_ERROR);
-        if cached.path.eq_ignore_ascii_case(key) && cached.mtime == rec.mtime && cached.size == rec.size && !outdated_error {
-            return Arc::new(DocEntry::new(kind, cached.text, cached.error));
+        let outdated_slide_order = kind == DocKind::Pptx && cached.slides.is_none();
+        if cached.path.eq_ignore_ascii_case(key)
+            && cached.mtime == rec.mtime
+            && cached.size == rec.size
+            && !outdated_error
+            && !outdated_slide_order
+        {
+            let extracted = ExtractedText {
+                text: cached.text,
+                slides: cached.slides.unwrap_or_default(),
+            };
+            return Arc::new(DocEntry::new(kind, extracted, cached.error));
         }
     }
-    let (text, error) = match extract_text(&rec.path) {
-        Ok(text) => (text, None),
-        Err(message) => (String::new(), Some(message)),
+    let (extracted, error) = match extract_index_text(&rec.path) {
+        Ok(extracted) => (extracted, None),
+        Err(message) => (ExtractedText::default(), Some(message)),
     };
-    write_cache(&cache_path, &CacheFile { path: key.to_string(), mtime: rec.mtime, size: rec.size, text: text.clone(), error: error.clone() });
-    Arc::new(DocEntry::new(kind, text, error))
+    let slides = (kind == DocKind::Pptx).then(|| extracted.slides.clone());
+    let cache = CacheFile {
+        path: key.to_string(),
+        mtime: rec.mtime,
+        size: rec.size,
+        text: extracted.text.clone(),
+        error: error.clone(),
+        slides,
+    };
+    write_cache(&cache_path, &cache);
+    Arc::new(DocEntry::new(kind, extracted, error))
 }
 
 fn read_cache(path: &Path) -> Option<CacheFile> {

@@ -11,7 +11,7 @@ from .converter import convert
 from .templates import ConversionError
 
 # sidecar 子命令始终输出 JSON。md-to-word 为兼容既有脚本，仅在 --json 时输出 JSON。
-EDITOR_COMMANDS = {"notes", "share", "illustrate", "assistant", "ai", "chat", "compress"}
+EDITOR_COMMANDS = {"notes", "share", "illustrate", "assistant", "ai", "chat", "compress", "deck-preview", "deck-export"}
 
 
 def _read_payload() -> dict:
@@ -71,11 +71,25 @@ def _build_parser() -> argparse.ArgumentParser:
     # 流式输出：进度行 {"type": "start|file|progress|file_done"}，最后一行为汇总。选项从标准输入读取。
     compress = commands.add_parser("compress", help="压缩 pptx、docx、xlsx 内嵌的视频与图片，分辨率不变")
     compress.add_argument("--source", required=True, type=Path, help="源 Office 文档")
+    preview = commands.add_parser("deck-preview", help="读取 PPTX 的指定页与可选素材")
+    preview.add_argument("--source", required=True, type=Path, help="源 PPTX 文稿")
+    preview.add_argument("--slide-id", required=True, type=int, help="幻灯片 ID")
+    export = commands.add_parser("deck-export", help="将单张汇报草稿按单位模板导出成可编辑 PPTX")
+    export.add_argument("--template", required=True, type=Path, help="单位 PPTX 模板")
+    export.add_argument("--output", required=True, type=Path, help="新建 PPTX 文件")
     return parser
 
 
 def _run_editor_command(args: argparse.Namespace) -> dict:
     """执行阅读编辑器 sidecar 子命令。"""
+    if args.command == "deck-export":
+        from .deck_export import export_deck
+
+        return export_deck(args.template, args.output, _read_payload(), _print_json)
+    if args.command == "deck-preview":
+        from .deck_preview import preview_deck_slide
+
+        return preview_deck_slide(args.source, args.slide_id, _print_json)
     if args.command == "chat":
         return editor_api.chat_stream(_read_payload(), _print_json)
     if args.command == "compress":

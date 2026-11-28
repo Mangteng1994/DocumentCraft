@@ -1,0 +1,44 @@
+/* 原页预览复用搜索预览排版；这里仅定义幻灯片图像和对象命中区。 */
+.dc-deck-slide {
+  display: grid;
+  gap: var(--dc-space-lg);
+}
+
+.dc-deck-preview {
+  position: relative;
+  overflow: hidden;
+  max-width: var(--dc-size-document);
+  border: var(--dc-border);
+  border-radius: var(--dc-radius-md);
+}
+
+.dc-deck-preview-image {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.dc-deck-hotspot {
+  position: absolute;
+  border: none;
+  background: none;
+  cursor: pointer;
+}
+
+.dc-deck-hotspot:hover:not(:disabled),
+.dc-deck-hotspot[aria-pressed="true"] {
+  background: var(--dc-color-accent-soft);
+  box-shadow: var(--dc-shadow-document-search-current);
+}
+
+.dc-deck-hotspot:disabled {
+  pointer-events: none;
+}
+
+.dc-deck-asset {
+  justify-content: space-between;
+}
+
+.dc-deck-asset[aria-pressed="true"] {
+  background: var(--dc-color-accent-soft);
+}

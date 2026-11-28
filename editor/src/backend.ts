@@ -42,11 +42,21 @@ export function createFolder(directory: string, name: string): Promise<string> {
   return invoke<string>("create_folder", { directory, name });
 }
 
+export interface SearchSlide {
+  /** 幻灯片在源文稿中的当前页码，从 1 起。 */
+  number: number;
+  /** 幻灯片在源文稿中的持久 ID，调页序时不变。 */
+  id: number;
+  title: string | null;
+}
+
 export interface SearchMatch {
   line: number;
   occurrence: number;
   /** 位置说明：纯文本是行号，文档是「第 N 页」「第 N 段」等。 */
   locator: string;
+  /** PPTX 命中才附带幻灯片信息，便于向汇报加入来源页。 */
+  slide?: SearchSlide;
   before: string;
   hit: string;
   after: string;

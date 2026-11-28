@@ -10,7 +10,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Check, ChevronDown, File, FileText, Search, X } from "lucide-react";
-import { errorText, searchWorkspace, type SearchFile, type SearchResult, type TreeNode } from "../backend";
+import { errorText, searchWorkspace, type SearchFile, type SearchResult, type SearchSlide, type TreeNode } from "../backend";
 import { openDocument, openWithSystem, renamePath, showSearchPreview } from "../documentActions";
 import { parentDirectory, relativePath } from "../paths";
 import { SEARCH_MODES, type SearchMode } from "../settings/schema";
@@ -215,9 +215,9 @@ function SearchFileGroup(props: SearchFileGroupProps) {
   const isMarkdown = MARKDOWN_NAME.test(file.name);
   const isRenaming = renaming === file.path;
   const isMenuTarget = menuPath === file.path;
-  /** 弹出预览页；focusLocator 为被点击匹配的位置说明，预览页据此滚动到对应命中。 */
-  const preview = (focusLocator: string) => {
-    showSearchPreview({ path: file.path, name: file.name, query, mode, focusLocator });
+  /** PPTX 正文命中传入页 ID，其余结果沿用按文本命中定位的预览。 */
+  const preview = (focusLocator: string, slide?: SearchSlide) => {
+    showSearchPreview({ path: file.path, name: file.name, query, mode, focusLocator, slide });
   };
   // 文件行和匹配行的右键都以该文件为对象，与目录树里右键文件一致；阻止冒泡，空白处的菜单由外层处理。
   const handleContextMenu = (event: React.MouseEvent) => {
@@ -256,9 +256,10 @@ function SearchFileGroup(props: SearchFileGroupProps) {
         <ul className="dc-search-matches">
           {file.matches.map((match) => (
             <li key={match.occurrence}>
-              <button type="button" className="dc-search-match" onClick={() => preview(match.locator)}>
-                <span className="dc-search-line">{match.locator}</span>
+              <button type="button" className="dc-search-match" onClick={() => preview(match.locator, match.slide)}>
+                <span className="dc-search-line">{match.slide ? `第 ${match.slide.number} 页` : match.locator}</span>
                 <span className="dc-search-snippet">
+                  {match.slide?.title && <strong>{match.slide.title} · </strong>}
                   {match.before}
                   <mark className="dc-search-hit">{match.hit}</mark>
                   {match.after}
